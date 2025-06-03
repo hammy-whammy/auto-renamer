@@ -1,0 +1,1 @@
+Auto-renamer program that automatically renames files using their contents and following a specific formula.
