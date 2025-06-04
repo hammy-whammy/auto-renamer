@@ -226,7 +226,7 @@ class PDFRenamer:
             raise ValueError("Please set your Gemini API key in the .env file or pass it as a parameter")
         
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
         self.csv_dir = Path(csv_dir)
         
         # Initialize persistent rate limiter
