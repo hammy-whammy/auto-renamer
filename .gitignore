@@ -4,6 +4,9 @@
 # API usage tracking
 .api_usage.json
 
+# Detailed logging output
+logs/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -57,6 +60,7 @@ Thumbs.db
 
 # Tests
 tests/
+test_pdfs/
 
 # Backup files
 *.bak

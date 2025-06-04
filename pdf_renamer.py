@@ -26,6 +26,222 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+class ProcessingLogger:
+    """Enhanced logger for PDF processing with structured output and detailed reporting."""
+    
+    def __init__(self, log_dir: str = "logs", enable_file_logging: bool = True):
+        self.log_dir = Path(log_dir)
+        self.enable_file_logging = enable_file_logging
+        self.processing_results = []
+        self.session_stats = {
+            'start_time': datetime.now(),
+            'total_files': 0,
+            'successful': 0,
+            'failed': 0,
+            'skipped': 0,
+            'api_requests_used': 0
+        }
+        
+        if self.enable_file_logging:
+            self.log_dir.mkdir(exist_ok=True)
+            self.setup_file_logging()
+    
+    def setup_file_logging(self):
+        """Setup structured file logging."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file = self.log_dir / f"pdf_renaming_{timestamp}.log"
+        self.json_log_file = self.log_dir / f"pdf_renaming_{timestamp}.json"
+        
+        # Create file handler with custom formatter
+        self.file_handler = logging.FileHandler(self.log_file, encoding='utf-8')
+        self.file_handler.setLevel(logging.INFO)
+        
+        # Custom formatter for readable logs
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        self.file_handler.setFormatter(formatter)
+        
+        # Add to existing logger
+        logger.addHandler(self.file_handler)
+        
+        self.log_session_start()
+    
+    def log_session_start(self):
+        """Log session start information."""
+        logger.info("=" * 80)
+        logger.info("PDF INVOICE RENAMING SESSION STARTED")
+        logger.info("=" * 80)
+        logger.info(f"Session ID: {datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        if self.enable_file_logging:
+            logger.info(f"Log file: {self.log_file}")
+            logger.info(f"JSON report: {self.json_log_file}")
+    
+    def log_processing_start(self, pdf_count: int, directory: str, dry_run: bool, rate_limit_status: Dict):
+        """Log processing start details."""
+        mode = "DRY RUN" if dry_run else "LIVE"
+        self.session_stats['total_files'] = pdf_count
+        
+        logger.info("-" * 80)
+        logger.info(f"PROCESSING START - {mode} MODE")
+        logger.info("-" * 80)
+        logger.info(f"Directory: {directory}")
+        logger.info(f"PDF files found: {pdf_count}")
+        logger.info(f"Mode: {mode}")
+        logger.info(f"API quota: {rate_limit_status['requests_today']}/{rate_limit_status['max_per_day']} used today")
+        logger.info(f"Remaining requests: {rate_limit_status['remaining_today']}")
+        
+        if pdf_count > rate_limit_status['remaining_today']:
+            logger.warning(f"⚠️  WARNING: Found {pdf_count} PDFs but only {rate_limit_status['remaining_today']} API requests remaining!")
+    
+    def log_file_processing_start(self, filename: str, file_index: int, total_files: int):
+        """Log individual file processing start."""
+        logger.info("-" * 50)
+        logger.info(f"Processing file {file_index}/{total_files}: {filename}")
+    
+    def log_file_success(self, original_name: str, new_name: str, extracted_data: Dict, dry_run: bool):
+        """Log successful file processing."""
+        action = "Would rename" if dry_run else "Renamed"
+        logger.info(f"✅ SUCCESS: {action} '{original_name}' → '{new_name}'")
+        
+        # Log extracted information
+        if extracted_data:
+            logger.info(f"   📊 Extracted data:")
+            if 'restaurant_name' in extracted_data:
+                logger.info(f"     Restaurant: {extracted_data['restaurant_name']}")
+            if 'site_number' in extracted_data:
+                logger.info(f"     Site: {extracted_data['site_number']}")
+            if 'collecte' in extracted_data:
+                logger.info(f"     Collecte: {extracted_data['collecte']}")
+            if 'waste_types' in extracted_data and extracted_data['waste_types']:
+                logger.info(f"     Waste types: {', '.join(extracted_data['waste_types'])}")
+            if 'invoice_number' in extracted_data:
+                logger.info(f"     Invoice #: {extracted_data['invoice_number']}")
+            if 'invoice_date' in extracted_data:
+                logger.info(f"     Date: {extracted_data['invoice_date']}")
+        
+        self.session_stats['successful'] += 1
+        self.processing_results.append({
+            'status': 'success',
+            'original_name': original_name,
+            'new_name': new_name,
+            'extracted_data': extracted_data,
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    def log_file_failure(self, filename: str, reason: str, details: Dict = None):
+        """Log file processing failure with detailed reason."""
+        logger.error(f"❌ FAILED: {filename}")
+        logger.error(f"   Reason: {reason}")
+        
+        if details:
+            logger.error(f"   Details:")
+            for key, value in details.items():
+                logger.error(f"     {key}: {value}")
+        
+        self.session_stats['failed'] += 1
+        self.processing_results.append({
+            'status': 'failed',
+            'filename': filename,
+            'reason': reason,
+            'details': details or {},
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    def log_file_skipped(self, filename: str, reason: str):
+        """Log skipped file with reason."""
+        logger.warning(f"⏭️  SKIPPED: {filename}")
+        logger.warning(f"   Reason: {reason}")
+        
+        self.session_stats['skipped'] += 1
+        self.processing_results.append({
+            'status': 'skipped',
+            'filename': filename,
+            'reason': reason,
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    def log_api_request(self, filename: str, success: bool, response_data: Dict = None):
+        """Log API request details."""
+        if success:
+            logger.info(f"   🔄 API request successful for {filename}")
+            self.session_stats['api_requests_used'] += 1
+        else:
+            logger.error(f"   🔄 API request failed for {filename}")
+            if response_data:
+                logger.error(f"   Error details: {response_data}")
+    
+    def log_rate_limit_wait(self, wait_time: float, reason: str):
+        """Log rate limiting wait."""
+        logger.warning(f"⏳ Rate limit reached: {reason}")
+        logger.warning(f"   Waiting {wait_time:.1f} seconds...")
+    
+    def log_session_end(self, final_rate_status: Dict):
+        """Log session end with comprehensive summary."""
+        end_time = datetime.now()
+        duration = end_time - self.session_stats['start_time']
+        
+        logger.info("=" * 80)
+        logger.info("PROCESSING SESSION COMPLETED")
+        logger.info("=" * 80)
+        logger.info(f"Duration: {duration}")
+        logger.info(f"Total files processed: {self.session_stats['total_files']}")
+        logger.info(f"✅ Successful: {self.session_stats['successful']}")
+        logger.info(f"❌ Failed: {self.session_stats['failed']}")
+        logger.info(f"⏭️  Skipped: {self.session_stats['skipped']}")
+        logger.info(f"🔄 API requests used: {self.session_stats['api_requests_used']}")
+        logger.info(f"📊 Final API quota: {final_rate_status['requests_today']}/{final_rate_status['max_per_day']}")
+        logger.info(f"🔋 Remaining requests: {final_rate_status['remaining_today']}")
+        
+        if self.session_stats['failed'] > 0:
+            logger.info("\n📋 FAILURE SUMMARY:")
+            for result in self.processing_results:
+                if result['status'] == 'failed':
+                    logger.info(f"   • {result['filename']}: {result['reason']}")
+        
+        if self.session_stats['skipped'] > 0:
+            logger.info("\n📋 SKIPPED FILES SUMMARY:")
+            for result in self.processing_results:
+                if result['status'] == 'skipped':
+                    logger.info(f"   • {result['filename']}: {result['reason']}")
+        
+        # Save detailed JSON report
+        if self.enable_file_logging:
+            self.save_json_report(end_time, duration)
+        
+        logger.info("=" * 80)
+    
+    def save_json_report(self, end_time: datetime, duration: timedelta):
+        """Save detailed JSON report."""
+        # Prepare summary stats with serializable data
+        summary_stats = self.session_stats.copy()
+        summary_stats['start_time'] = self.session_stats['start_time'].isoformat()
+        
+        report = {
+            'session_info': {
+                'start_time': self.session_stats['start_time'].isoformat(),
+                'end_time': end_time.isoformat(),
+                'duration_seconds': duration.total_seconds(),
+                'session_id': datetime.now().strftime('%Y%m%d_%H%M%S')
+            },
+            'summary': summary_stats,
+            'detailed_results': self.processing_results
+        }
+        
+        try:
+            with open(self.json_log_file, 'w', encoding='utf-8') as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+            logger.info(f"📄 Detailed JSON report saved: {self.json_log_file}")
+        except Exception as e:
+            logger.error(f"Failed to save JSON report: {e}")
+    
+    def cleanup(self):
+        """Cleanup logging handlers."""
+        if hasattr(self, 'file_handler'):
+            logger.removeHandler(self.file_handler)
+            self.file_handler.close()
+
 class PersistentRateLimiter:
     """
     Persistent rate limiter that stores usage data across program runs.
@@ -125,7 +341,7 @@ class PersistentRateLimiter:
         
         return recent_requests
         
-    def wait_if_needed(self):
+    def wait_if_needed(self, processing_logger=None):
         """Wait if necessary to respect rate limits."""
         now = datetime.now()
         today_str = now.date().isoformat()
@@ -141,7 +357,10 @@ class PersistentRateLimiter:
         if len(minute_requests) >= self.max_per_minute:
             sleep_time = 60 - (now - minute_requests[0]).total_seconds()
             if sleep_time > 0:
-                logger.info(f"Rate limit: waiting {sleep_time:.1f} seconds (used {len(minute_requests)}/{self.max_per_minute} requests this minute)")
+                if processing_logger:
+                    processing_logger.log_rate_limit_wait(sleep_time, f"Used {len(minute_requests)}/{self.max_per_minute} requests this minute")
+                else:
+                    logger.info(f"Rate limit: waiting {sleep_time:.1f} seconds (used {len(minute_requests)}/{self.max_per_minute} requests this minute)")
                 time.sleep(sleep_time)
                 # Refresh minute requests after waiting
                 minute_requests = self._get_minute_requests()
@@ -216,7 +435,7 @@ class PersistentRateLimiter:
 RateLimiter = PersistentRateLimiter
 
 class PDFRenamer:
-    def __init__(self, api_key: str = None, csv_dir: str = "."):
+    def __init__(self, api_key: str = None, csv_dir: str = ".", enable_detailed_logging: bool = True):
         """Initialize the PDF renamer with API key and CSV directory."""
         # Get API key from parameter or environment
         if not api_key:
@@ -228,6 +447,9 @@ class PDFRenamer:
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-2.0-flash')
         self.csv_dir = Path(csv_dir)
+        
+        # Initialize enhanced logging
+        self.processing_logger = ProcessingLogger(enable_file_logging=enable_detailed_logging)
         
         # Initialize persistent rate limiter
         max_per_minute = int(os.getenv('MAX_REQUESTS_PER_MINUTE', 15))
@@ -351,7 +573,7 @@ class PDFRenamer:
             logger.error(f"Error extracting text from {pdf_path}: {e}")
             return ""
     
-    def _analyze_invoice_with_gemini(self, pdf_text: str) -> Dict:
+    def _analyze_invoice_with_gemini(self, pdf_text: str, filename: str = "unknown") -> Dict:
         """Use Gemini to analyze invoice content and extract key information."""
         prompt = f"""
         Analyze this French invoice text and extract the following information in JSON format:
@@ -376,7 +598,7 @@ class PDFRenamer:
         
         try:
             # Wait if necessary to respect rate limits
-            self.rate_limiter.wait_if_needed()
+            self.rate_limiter.wait_if_needed(self.processing_logger)
             
             # Make the API call
             response = self.model.generate_content(prompt)
@@ -390,9 +612,12 @@ class PDFRenamer:
             if response_text.endswith('```'):
                 response_text = response_text[:-3]
             
-            return json.loads(response_text)
+            result = json.loads(response_text)
+            self.processing_logger.log_api_request(filename, True, result)
+            return result
         except Exception as e:
             logger.error(f"Error analyzing invoice with Gemini: {e}")
+            self.processing_logger.log_api_request(filename, False, {"error": str(e)})
             return {}
     
     def _find_restaurant_site(self, entreprise_name: str, collecte: str) -> Optional[str]:
@@ -566,6 +791,102 @@ class PDFRenamer:
         logger.info(f"Generated filename: {new_filename}")
         return new_filename
     
+    def generate_new_filename_with_details(self, pdf_path: Path) -> Tuple[Optional[str], Dict]:
+        """Generate new filename for a PDF and return detailed extraction data."""
+        # Extract text from PDF
+        pdf_text = self._extract_pdf_text(pdf_path)
+        if not pdf_text:
+            error_details = {
+                'error': 'Could not extract text from PDF',
+                'pdf_size': f"{pdf_path.stat().st_size} bytes",
+                'file_extension': pdf_path.suffix
+            }
+            return None, error_details
+        
+        # Analyze with Gemini
+        analysis = self._analyze_invoice_with_gemini(pdf_text, pdf_path.name)
+        if not analysis:
+            error_details = {
+                'error': 'Could not analyze invoice content',
+                'pdf_text_length': len(pdf_text),
+                'analysis_result': analysis
+            }
+            return None, error_details
+        
+        # Extract required information
+        entreprise = analysis.get('entreprise', '')
+        invoice_provider = analysis.get('invoice_provider', '')
+        invoice_date = analysis.get('invoice_date', '')
+        invoice_number = analysis.get('invoice_number', '')
+        waste_types = analysis.get('waste_types', [])
+        
+        # Prepare detailed extraction data
+        extracted_data = {
+            'restaurant_name': entreprise,
+            'invoice_provider': invoice_provider,
+            'invoice_date': invoice_date,
+            'invoice_number': invoice_number,
+            'waste_types': waste_types,
+            'raw_analysis': analysis
+        }
+        
+        # Validate required fields
+        missing_fields = []
+        if not entreprise:
+            missing_fields.append('entreprise')
+        if not invoice_provider:
+            missing_fields.append('invoice_provider')
+        if not invoice_date:
+            missing_fields.append('invoice_date')
+        if not invoice_number:
+            missing_fields.append('invoice_number')
+        
+        if missing_fields:
+            extracted_data['error'] = f"Missing required fields: {', '.join(missing_fields)}"
+            extracted_data['available_fields'] = {k: v for k, v in analysis.items() if v}
+            return None, extracted_data
+        
+        # Find base collecte name from the full provider name
+        base_collecte = self._find_base_collecte_name(invoice_provider)
+        if not base_collecte:
+            extracted_data['error'] = f"Could not find base collecte name for provider '{invoice_provider}'"
+            extracted_data['available_providers'] = list(self.prestataires_data.keys())
+            return None, extracted_data
+        
+        extracted_data['base_collecte'] = base_collecte
+        
+        # Find site number using the base collecte name
+        site_number = self._find_restaurant_site(entreprise, base_collecte)
+        if not site_number:
+            extracted_data['error'] = f"Could not find site number for '{entreprise}' with collecte '{base_collecte}'"
+            # Find similar restaurant names for debugging
+            similar_restaurants = []
+            for restaurant in self.restaurants_data:
+                if any(word in restaurant['Entreprise'].lower() for word in entreprise.lower().split() if len(word) > 2):
+                    similar_restaurants.append({
+                        'name': restaurant['Entreprise'],
+                        'site': restaurant['Site'],
+                        'collecte': restaurant['Collecte']
+                    })
+            extracted_data['similar_restaurants'] = similar_restaurants[:5]  # Top 5 matches
+            return None, extracted_data
+        
+        extracted_data['site_number'] = site_number
+        
+        # Determine collecte suffix using the base collecte name
+        collecte_suffix = self._determine_collecte_suffix(base_collecte, waste_types)
+        extracted_data['collecte'] = collecte_suffix
+        
+        # Format date
+        formatted_date = self._format_date(invoice_date)
+        extracted_data['formatted_date'] = formatted_date
+        
+        # Generate filename
+        new_filename = f"{site_number}-{collecte_suffix}-{formatted_date}-{invoice_number}.pdf"
+        extracted_data['generated_filename'] = new_filename
+        
+        return new_filename, extracted_data
+
     def rename_pdfs_in_directory(self, directory: Path, dry_run: bool = True) -> Dict:
         """Rename all PDFs in a directory."""
         results = {
@@ -575,17 +896,23 @@ class PDFRenamer:
         }
         
         pdf_files = list(directory.glob('*.pdf'))
-        logger.info(f"Found {len(pdf_files)} PDF files to process")
         
-        for pdf_file in pdf_files:
+        # Log processing start
+        rate_status = self.get_rate_limit_status()
+        self.processing_logger.log_processing_start(len(pdf_files), str(directory), dry_run, rate_status)
+        
+        for i, pdf_file in enumerate(pdf_files, 1):
+            self.processing_logger.log_file_processing_start(pdf_file.name, i, len(pdf_files))
+            
             try:
-                new_filename = self.generate_new_filename(pdf_file)
+                new_filename, extracted_data = self.generate_new_filename_with_details(pdf_file)
                 
                 if new_filename:
                     new_path = pdf_file.parent / new_filename
                     
                     if new_path.exists():
-                        logger.warning(f"Target file already exists: {new_path}")
+                        reason = f"Target file already exists: {new_filename}"
+                        self.processing_logger.log_file_skipped(pdf_file.name, reason)
                         results['skipped'].append({
                             'original': str(pdf_file),
                             'target': str(new_path),
@@ -595,26 +922,39 @@ class PDFRenamer:
                     
                     if not dry_run:
                         pdf_file.rename(new_path)
-                        logger.info(f"Renamed: {pdf_file.name} -> {new_filename}")
-                    else:
-                        logger.info(f"DRY RUN: Would rename {pdf_file.name} -> {new_filename}")
                     
+                    self.processing_logger.log_file_success(pdf_file.name, new_filename, extracted_data, dry_run)
                     results['success'].append({
                         'original': str(pdf_file),
                         'new': str(new_path)
                     })
                 else:
+                    reason = "Could not generate filename - missing or invalid data from AI analysis"
+                    details = {
+                        'extracted_data': extracted_data,
+                        'pdf_size': f"{pdf_file.stat().st_size} bytes"
+                    }
+                    self.processing_logger.log_file_failure(pdf_file.name, reason, details)
                     results['failed'].append({
                         'file': str(pdf_file),
-                        'reason': 'Could not generate filename'
+                        'reason': reason
                     })
                     
             except Exception as e:
-                logger.error(f"Error processing {pdf_file}: {e}")
+                reason = f"Processing error: {str(e)}"
+                details = {
+                    'error_type': type(e).__name__,
+                    'pdf_size': f"{pdf_file.stat().st_size} bytes" if pdf_file.exists() else "unknown"
+                }
+                self.processing_logger.log_file_failure(pdf_file.name, reason, details)
                 results['failed'].append({
                     'file': str(pdf_file),
-                    'reason': str(e)
+                    'reason': reason
                 })
+        
+        # Log session end
+        final_rate_status = self.get_rate_limit_status()
+        self.processing_logger.log_session_end(final_rate_status)
         
         return results
 
@@ -677,13 +1017,15 @@ def main():
     parser.add_argument('--status', action='store_true', help='Show current rate limit status and exit')
     parser.add_argument('--weekly-summary', action='store_true', help='Show weekly API usage summary and exit')
     parser.add_argument('--reset-counter', action='store_true', help='Reset today\'s API request counter (use with caution)')
+    parser.add_argument('--disable-detailed-logging', action='store_true', help='Disable detailed log files (console only)')
     
     args = parser.parse_args()
     
     # Handle status and summary commands first (don't need directory)
     if args.status or args.weekly_summary or args.reset_counter:
         try:
-            renamer = PDFRenamer(args.api_key, args.csv_dir)
+            enable_detailed_logging = not args.disable_detailed_logging
+            renamer = PDFRenamer(args.api_key, args.csv_dir, enable_detailed_logging)
             
             if args.status:
                 status = renamer.get_rate_limit_status()
@@ -758,7 +1100,8 @@ def main():
     
     # Initialize renamer
     try:
-        renamer = PDFRenamer(args.api_key, csv_dir)
+        enable_detailed_logging = not args.disable_detailed_logging
+        renamer = PDFRenamer(args.api_key, csv_dir, enable_detailed_logging)
         
         # Show initial rate limit status
         status = renamer.get_rate_limit_status()
@@ -781,6 +1124,9 @@ def main():
     
     # Process files
     results = renamer.rename_pdfs_in_directory(pdf_dir, args.dry_run)
+    
+    # Get reference to processing logger for cleanup
+    processing_logger = renamer.processing_logger
     
     # Show final rate limit status
     final_status = renamer.get_rate_limit_status()
@@ -810,6 +1156,10 @@ def main():
     
     if final_status['remaining_today'] <= 10:
         print(f"\n⚠️  Warning: Only {final_status['remaining_today']} API requests remaining today!")
+    
+    # Log session end - Note: session end is already logged in rename_pdfs_in_directory()
+    # processing_logger.log_session_end(final_status)
+    processing_logger.cleanup()
 
 
 if __name__ == "__main__":

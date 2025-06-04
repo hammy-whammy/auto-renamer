@@ -9,7 +9,12 @@ Automatically renames PDF invoices based on their content using AI analysis and 
 - **Waste Type Detection**: Automatically detects DIB, BIO, CS waste types from invoice content
 - **CSV-Based Lookup**: Cross-references restaurant and prestataire data for accurate site numbers
 - **Safe Operation**: Includes dry-run mode to preview changes before execution
-- **Comprehensive Logging**: Detailed logging for troubleshooting and verification
+- **Enhanced Logging System**: 
+  - Detailed file-by-file processing logs
+  - JSON reports for automated analysis  
+  - Clear failure reasons with actionable suggestions
+  - See [Enhanced Logging Guide](ENHANCED_LOGGING_GUIDE.md) for details
+- **Persistent API Tracking**: Cross-restart usage monitoring with 7-day history
 
 ## Naming Convention
 
@@ -84,6 +89,40 @@ python3 pdf_renamer.py "/path/to/invoice/directory"
 
 ```bash
 # Reset today's counter (use with caution)
+python3 pdf_renamer.py --reset-counter
+
+# Use specific CSV directory
+python3 pdf_renamer.py "/path/to/invoices" --csv-dir "/path/to/csv/files"
+
+# Disable detailed log files (console only)
+python3 pdf_renamer.py "/path/to/invoices" --dry-run --disable-detailed-logging
+
+# Override API key (not recommended for security)
+python3 pdf_renamer.py "/path/to/invoices" --api-key "your-api-key"
+```
+
+### Enhanced Logging Features
+
+The system now provides comprehensive logging with detailed insights:
+
+```bash
+# Standard processing with detailed logs
+python3 pdf_renamer.py "/path/to/invoices" --dry-run
+# Creates: logs/pdf_renaming_YYYYMMDD_HHMMSS.log (readable)
+#         logs/pdf_renaming_YYYYMMDD_HHMMSS.json (structured data)
+
+# Console-only mode (no log files)
+python3 pdf_renamer.py "/path/to/invoices" --dry-run --disable-detailed-logging
+```
+
+**Log Files Include:**
+- 📊 File-by-file processing details
+- ✅ Success: extracted data, generated filenames  
+- ❌ Failures: specific reasons, suggested fixes
+- ⏳ Rate limiting: wait times, quota usage
+- 📈 Session summary: success rates, API usage
+
+See the [Enhanced Logging Guide](ENHANCED_LOGGING_GUIDE.md) for complete details.
 python3 pdf_renamer.py --reset-counter
 
 # Use specific CSV directory
