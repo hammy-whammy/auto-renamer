@@ -36,48 +36,50 @@ Where:
 
 ## Installation
 
-1. **Clone or download the files to your directory**
-
-2. **Run the setup script**:
+1. **Clone the repository**:
    ```bash
-   ./setup.sh
+   git clone <repository-url>
+   cd auto-renamer
    ```
-   
-   Or manually install dependencies:
+
+2. **Install dependencies**:
    ```bash
    pip3 install -r requirements.txt
    ```
 
-3. **Get a Google Gemini API key**:
-   - Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-   - Create a new API key
-   - Keep it secure
+3. **Set up environment variables**:
+   ```bash
+   # Copy the example environment file
+   cp .env.example .env
+   
+   # Edit .env and add your Google Gemini API key
+   nano .env
+   ```
+   
+   Get your API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+
+4. **Ensure CSV files are present**:
+   - `Restaurants.csv` - Restaurant site mapping
+   - `Prestataires.csv` - Waste collector combinations
 
 ## Usage
 
-### Basic Usage
+### Basic Usage (Recommended - with .env file)
+
+```bash
+python3 pdf_renamer.py "/path/to/invoice/directory"
+```
+
+### Start with Dry Run (Recommended)
+
+```bash
+python3 pdf_renamer.py "/path/to/invoice/directory" --dry-run
+```
+
+### Alternative: Direct API Key (Not Recommended for Security)
 
 ```bash
 python3 pdf_renamer.py "/path/to/invoice/directory" --api-key "your-gemini-api-key"
-```
-
-### Recommended: Start with Dry Run
-
-```bash
-python3 pdf_renamer.py "/path/to/invoice/directory" --api-key "your-gemini-api-key" --dry-run
-```
-
-### For Your Specific Directory
-
-```bash
-python3 pdf_renamer.py "/Users/hamza.ahmed/Library/CloudStorage/OneDrive-SharedLibraries-JICAP/Drive - 8- CHantier renommage automatique des factures/" --api-key "your-gemini-api-key" --dry-run
-```
-
-### Using Environment Variable
-
-```bash
-export GEMINI_API_KEY="your-gemini-api-key"
-python3 pdf_renamer.py "/path/to/invoice/directory" --api-key $GEMINI_API_KEY
 ```
 
 ## Command Line Options
