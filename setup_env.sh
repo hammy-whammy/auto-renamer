@@ -31,8 +31,11 @@ echo "3. Edit .env file and set your GEMINI_API_KEY"
 echo "4. Test with: python pdf_renamer.py --status"
 echo
 echo "🚀 Usage Examples:"
-echo "# Check rate limit status"
+echo "# Check rate limit status and usage history"
 echo "python pdf_renamer.py --status"
+echo
+echo "# Get weekly usage summary"
+echo "python pdf_renamer.py --weekly-summary"
 echo
 echo "# Dry run (test without renaming)"
 echo "python pdf_renamer.py '/path/to/pdfs' --dry-run"
@@ -44,3 +47,4 @@ echo "📊 Free Tier Limits:"
 echo "• 15 requests per minute"
 echo "• 1,500 requests per day"
 echo "• Rate limiting is automatically handled"
+echo "• Usage is tracked persistently across program runs"

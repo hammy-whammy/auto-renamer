@@ -26,68 +26,194 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class RateLimiter:
-    """Rate limiter to respect Google Gemini API free tier limits."""
+class PersistentRateLimiter:
+    """
+    Persistent rate limiter that stores usage data across program runs.
+    Respects Google Gemini API free tier limits with local file persistence.
+    """
     
-    def __init__(self, max_per_minute: int = 15, max_per_day: int = 1500):
+    def __init__(self, max_per_minute: int = 15, max_per_day: int = 1500, storage_file: str = ".api_usage.json"):
         self.max_per_minute = max_per_minute
         self.max_per_day = max_per_day
-        self.requests_this_minute = []
-        self.requests_today = 0
-        self.current_day = datetime.now().date()
+        self.storage_file = Path(storage_file)
         self.verbose = os.getenv('RATE_LIMIT_VERBOSE', 'false').lower() == 'true'
+        
+        # Load persistent data
+        self.usage_data = self._load_usage_data()
+        self._cleanup_old_data()
+        
+    def _load_usage_data(self) -> Dict:
+        """Load usage data from persistent storage."""
+        default_data = {
+            'daily_requests': {},
+            'minute_requests': [],
+            'last_updated': datetime.now().isoformat()
+        }
+        
+        if not self.storage_file.exists():
+            self._save_usage_data(default_data)
+            return default_data
+            
+        try:
+            with open(self.storage_file, 'r') as f:
+                data = json.load(f)
+                # Ensure all required keys exist
+                for key in default_data:
+                    if key not in data:
+                        data[key] = default_data[key]
+                return data
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Could not load usage data: {e}. Starting fresh.")
+            self._save_usage_data(default_data)
+            return default_data
+    
+    def _save_usage_data(self, data: Dict = None):
+        """Save usage data to persistent storage."""
+        try:
+            save_data = data or self.usage_data
+            save_data['last_updated'] = datetime.now().isoformat()
+            with open(self.storage_file, 'w') as f:
+                json.dump(save_data, f, indent=2)
+        except IOError as e:
+            logger.error(f"Could not save usage data: {e}")
+    
+    def _cleanup_old_data(self):
+        """Remove old usage data to keep file size manageable."""
+        now = datetime.now()
+        today_str = now.date().isoformat()
+        
+        # Keep only last 7 days of daily data
+        cutoff_date = (now - timedelta(days=7)).date().isoformat()
+        
+        # Clean daily requests
+        old_keys = [date_str for date_str in self.usage_data['daily_requests'].keys() 
+                   if date_str < cutoff_date]
+        for old_key in old_keys:
+            del self.usage_data['daily_requests'][old_key]
+        
+        # Clean minute requests (keep only last hour)
+        hour_ago = now - timedelta(hours=1)
+        hour_ago_iso = hour_ago.isoformat()
+        
+        self.usage_data['minute_requests'] = [
+            req_time for req_time in self.usage_data['minute_requests']
+            if req_time > hour_ago_iso
+        ]
+        
+        # Save cleaned data
+        self._save_usage_data()
+    
+    def _get_today_requests(self) -> int:
+        """Get number of requests made today."""
+        today_str = datetime.now().date().isoformat()
+        return self.usage_data['daily_requests'].get(today_str, 0)
+    
+    def _get_minute_requests(self) -> List[datetime]:
+        """Get list of requests made in the last minute."""
+        now = datetime.now()
+        minute_ago = now - timedelta(minutes=1)
+        
+        # Convert stored ISO strings back to datetime objects for recent requests
+        recent_requests = []
+        for req_time_str in self.usage_data['minute_requests']:
+            try:
+                req_time = datetime.fromisoformat(req_time_str)
+                if req_time > minute_ago:
+                    recent_requests.append(req_time)
+            except ValueError:
+                continue  # Skip invalid dates
+        
+        return recent_requests
         
     def wait_if_needed(self):
         """Wait if necessary to respect rate limits."""
         now = datetime.now()
-        
-        # Reset daily counter if it's a new day
-        if now.date() != self.current_day:
-            self.requests_today = 0
-            self.current_day = now.date()
-            if self.verbose:
-                logger.info("New day - resetting daily request counter")
+        today_str = now.date().isoformat()
         
         # Check daily limit
-        if self.requests_today >= self.max_per_day:
+        today_requests = self._get_today_requests()
+        if today_requests >= self.max_per_day:
             logger.warning(f"Daily limit of {self.max_per_day} requests reached. Please try again tomorrow.")
             raise Exception(f"Daily API limit reached ({self.max_per_day} requests)")
         
-        # Remove requests older than 1 minute
-        minute_ago = now - timedelta(minutes=1)
-        self.requests_this_minute = [req_time for req_time in self.requests_this_minute if req_time > minute_ago]
-        
         # Check per-minute limit
-        if len(self.requests_this_minute) >= self.max_per_minute:
-            sleep_time = 60 - (now - self.requests_this_minute[0]).total_seconds()
+        minute_requests = self._get_minute_requests()
+        if len(minute_requests) >= self.max_per_minute:
+            sleep_time = 60 - (now - minute_requests[0]).total_seconds()
             if sleep_time > 0:
-                logger.info(f"Rate limit: waiting {sleep_time:.1f} seconds (used {len(self.requests_this_minute)}/{self.max_per_minute} requests this minute)")
+                logger.info(f"Rate limit: waiting {sleep_time:.1f} seconds (used {len(minute_requests)}/{self.max_per_minute} requests this minute)")
                 time.sleep(sleep_time)
-                # Clean up the list after waiting
-                minute_ago = datetime.now() - timedelta(minutes=1)
-                self.requests_this_minute = [req_time for req_time in self.requests_this_minute if req_time > minute_ago]
+                # Refresh minute requests after waiting
+                minute_requests = self._get_minute_requests()
         
         # Record this request
-        self.requests_this_minute.append(now)
-        self.requests_today += 1
+        self.usage_data['minute_requests'].append(now.isoformat())
+        self.usage_data['daily_requests'][today_str] = today_requests + 1
+        
+        # Save updated data
+        self._save_usage_data()
         
         if self.verbose:
-            logger.info(f"API request #{self.requests_today} today, {len(self.requests_this_minute)} this minute")
+            logger.info(f"API request #{today_requests + 1} today, {len(minute_requests) + 1} this minute")
     
     def get_status(self) -> Dict:
         """Get current rate limiting status."""
-        now = datetime.now()
-        minute_ago = now - timedelta(minutes=1)
-        self.requests_this_minute = [req_time for req_time in self.requests_this_minute if req_time > minute_ago]
+        today_requests = self._get_today_requests()
+        minute_requests = self._get_minute_requests()
+        
+        # Get historical data for context
+        historical_data = []
+        for date_str, count in sorted(self.usage_data['daily_requests'].items())[-7:]:  # Last 7 days
+            historical_data.append({
+                'date': date_str,
+                'requests': count
+            })
         
         return {
-            'requests_today': self.requests_today,
+            'requests_today': today_requests,
             'max_per_day': self.max_per_day,
-            'requests_this_minute': len(self.requests_this_minute),
+            'requests_this_minute': len(minute_requests),
             'max_per_minute': self.max_per_minute,
-            'remaining_today': self.max_per_day - self.requests_today,
-            'remaining_this_minute': self.max_per_minute - len(self.requests_this_minute)
+            'remaining_today': self.max_per_day - today_requests,
+            'remaining_this_minute': self.max_per_minute - len(minute_requests),
+            'historical_usage': historical_data,
+            'total_lifetime_requests': sum(self.usage_data['daily_requests'].values())
         }
+    
+    def reset_today_count(self):
+        """Reset today's count (useful for testing or if you know the count is wrong)."""
+        today_str = datetime.now().date().isoformat()
+        self.usage_data['daily_requests'][today_str] = 0
+        self._save_usage_data()
+        logger.info("Today's request count has been reset to 0")
+    
+    def get_weekly_summary(self) -> Dict:
+        """Get a summary of API usage for the past week."""
+        now = datetime.now()
+        
+        weekly_total = 0
+        daily_breakdown = []
+        
+        # Get last 7 days including today
+        for i in range(7):
+            date = (now - timedelta(days=6-i)).date()  # Start from 6 days ago to today
+            date_str = date.isoformat()
+            count = self.usage_data['daily_requests'].get(date_str, 0)
+            weekly_total += count
+            daily_breakdown.append({
+                'date': date_str,
+                'day_name': date.strftime('%A'),
+                'requests': count
+            })
+        
+        return {
+            'weekly_total': weekly_total,
+            'daily_breakdown': daily_breakdown,
+            'average_per_day': weekly_total / 7
+        }
+
+# Backward compatibility alias
+RateLimiter = PersistentRateLimiter
 
 class PDFRenamer:
     def __init__(self, api_key: str = None, csv_dir: str = "."):
@@ -103,12 +229,16 @@ class PDFRenamer:
         self.model = genai.GenerativeModel('gemini-1.5-flash')
         self.csv_dir = Path(csv_dir)
         
-        # Initialize rate limiter
+        # Initialize persistent rate limiter
         max_per_minute = int(os.getenv('MAX_REQUESTS_PER_MINUTE', 15))
         max_per_day = int(os.getenv('MAX_REQUESTS_PER_DAY', 1500))
-        self.rate_limiter = RateLimiter(max_per_minute, max_per_day)
+        self.rate_limiter = PersistentRateLimiter(max_per_minute, max_per_day)
         
         logger.info(f"Rate limiter initialized: {max_per_minute}/minute, {max_per_day}/day")
+        
+        # Show current usage on startup
+        status = self.rate_limiter.get_status()
+        logger.info(f"Current usage: {status['requests_today']}/{status['max_per_day']} requests today")
         
         # Load data from CSV files
         self.restaurants_data = self._load_restaurants_data()
@@ -492,6 +622,14 @@ class PDFRenamer:
         """Get current rate limiting status."""
         return self.rate_limiter.get_status()
     
+    def get_weekly_summary(self) -> Dict:
+        """Get weekly API usage summary."""
+        return self.rate_limiter.get_weekly_summary()
+    
+    def reset_daily_counter(self):
+        """Reset today's API request counter (use with caution)."""
+        self.rate_limiter.reset_today_count()
+    
     def _find_base_collecte_name(self, provider_name):
         """Find the base collecte name from a full provider name using fuzzy matching."""
         if not provider_name:
@@ -532,14 +670,60 @@ class PDFRenamer:
 
 def main():
     parser = argparse.ArgumentParser(description='Rename PDF invoices based on content')
-    parser.add_argument('directory', help='Directory containing PDF files to rename')
+    parser.add_argument('directory', nargs='?', help='Directory containing PDF files to rename')
     parser.add_argument('--api-key', help='Google Gemini API key (or set GEMINI_API_KEY in .env file)')
     parser.add_argument('--csv-dir', default='.', help='Directory containing CSV files (default: current directory)')
     parser.add_argument('--dry-run', action='store_true', help='Perform dry run without actually renaming files')
     parser.add_argument('--status', action='store_true', help='Show current rate limit status and exit')
+    parser.add_argument('--weekly-summary', action='store_true', help='Show weekly API usage summary and exit')
+    parser.add_argument('--reset-counter', action='store_true', help='Reset today\'s API request counter (use with caution)')
     
     args = parser.parse_args()
     
+    # Handle status and summary commands first (don't need directory)
+    if args.status or args.weekly_summary or args.reset_counter:
+        try:
+            renamer = PDFRenamer(args.api_key, args.csv_dir)
+            
+            if args.status:
+                status = renamer.get_rate_limit_status()
+                print(f"📊 Rate Limit Status:")
+                print(f"  Today: {status['requests_today']}/{status['max_per_day']} ({status['remaining_today']} remaining)")
+                print(f"  This minute: {status['requests_this_minute']}/{status['max_per_minute']} ({status['remaining_this_minute']} remaining)")
+                print(f"  Total lifetime requests: {status['total_lifetime_requests']}")
+                
+                if status['historical_usage']:
+                    print(f"\n📈 Recent Usage (last 7 days):")
+                    for day in status['historical_usage']:
+                        print(f"    {day['date']}: {day['requests']} requests")
+                
+            if args.weekly_summary:
+                summary = renamer.get_weekly_summary()
+                print(f"\n📅 Weekly Summary:")
+                print(f"  Total requests this week: {summary['weekly_total']}")
+                print(f"  Average per day: {summary['average_per_day']:.1f}")
+                print(f"\n  Daily breakdown:")
+                for day in summary['daily_breakdown']:
+                    print(f"    {day['day_name']} ({day['date']}): {day['requests']} requests")
+                
+            if args.reset_counter:
+                print("⚠️  Are you sure you want to reset today's API request counter?")
+                response = input("This should only be done if you know the count is incorrect. Type 'yes' to confirm: ")
+                if response.lower() == 'yes':
+                    renamer.reset_daily_counter()
+                    print("✅ Today's request counter has been reset to 0")
+                else:
+                    print("❌ Reset cancelled")
+                    
+            return
+        except Exception as e:
+            logger.error(f"Error: {e}")
+            return
+    
+    # For processing, directory is required
+    if not args.directory:
+        parser.error("Directory argument is required for processing PDFs")
+        
     # If just checking status
     if args.status:
         try:

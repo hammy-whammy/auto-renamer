@@ -186,7 +186,7 @@ An automated Python-based system that:
 
 #### Core Modules
 1. **PDFRenamer**: Main orchestration class
-2. **RateLimiter**: API throttling and quota management
+2. **PersistentRateLimiter**: Advanced API throttling with cross-restart persistence
 3. **Text Extraction**: PyPDF2-based PDF processing
 4. **AI Analysis**: Google Gemini integration
 5. **Data Matching**: CSV-based lookup and fuzzy matching
@@ -208,7 +208,69 @@ An automated Python-based system that:
 7. Filename generation
 8. File renaming (or dry-run preview)
 
-### 6.3 Integration Points
+### 6.3 Rate Limiting & API Management
+
+#### Persistent Rate Limiter
+The system implements **PersistentRateLimiter** - an intelligent rate limiting solution that stores usage data across program runs to respect Google Gemini API free tier limits.
+
+**Key Features:**
+- ✅ **Persistent Storage**: Local `.api_usage.json` file tracks usage across restarts
+- ✅ **Dual Rate Limiting**: 15 requests/minute, 1,500 requests/day
+- ✅ **Historical Tracking**: 7-day usage history with automatic cleanup
+- ✅ **Enhanced CLI**: Status checking, weekly summaries, counter reset
+- ✅ **Privacy-Focused**: All data stays local, no cloud dependencies
+
+**Data Structure:**
+```json
+{
+  "daily_requests": {
+    "2025-06-04": 23,
+    "2025-06-03": 67,
+    "2025-06-02": 45
+  },
+  "minute_requests": [
+    "2025-06-04T13:19:43.313122",
+    "2025-06-04T13:18:32.124567"
+  ],
+  "last_updated": "2025-06-04T13:20:12.585203"
+}
+```
+
+**CLI Commands:**
+```bash
+# Current status with history
+python pdf_renamer.py --status
+
+# Weekly usage summary
+python pdf_renamer.py --weekly-summary
+
+# Reset counter (emergency use)
+python pdf_renamer.py --reset-counter
+```
+
+#### Alternative Monitoring Solutions
+For enterprise users requiring more robust tracking, Google Cloud Monitoring provides official API usage metrics:
+
+**Setup Requirements:**
+- Google Cloud Project with billing enabled
+- Cloud Monitoring API access
+- Service Account credentials
+- Additional dependencies: `google-cloud-monitoring`
+
+**Pros/Cons Comparison:**
+
+| Feature | Local Persistent | Google Cloud Monitoring |
+|---------|------------------|------------------------|
+| Setup Complexity | ✅ Simple | ❌ Complex |
+| Cross-Device Sync | ❌ Single machine | ✅ Multi-device |
+| Privacy | ✅ Local only | ❌ Cloud-based |
+| Cost | ✅ Free | ❌ Usage charges |
+| Accuracy | ✅ Real-time | ❌ May have delays |
+| Enterprise Features | ❌ Basic | ✅ Dashboards, alerts |
+
+**Recommendation**: Use built-in persistent tracking for most use cases. Consider Google Cloud Monitoring only for enterprise requirements.
+
+### 6.4 Integration Points
 - **Google Gemini API**: External AI service for content analysis
 - **Local File System**: PDF processing and CSV data access
 - **Environment Configuration**: Secure API key management
@@ -266,11 +328,108 @@ python pdf_renamer.py --status
 - CSV database placement
 - Directory permissions configuration
 
-### 9.3 Monitoring
-- **Rate Limit Tracking**: API usage monitoring
-- **Error Rate Monitoring**: Failure pattern analysis
-- **Performance Metrics**: Processing time tracking
-- **Success Rate Reporting**: Accuracy measurements
+### 9.3 Monitoring & Usage Tracking
+
+#### Built-in Persistent Monitoring
+The system includes comprehensive API usage tracking via **PersistentRateLimiter**:
+
+**Local Tracking Features:**
+- **Cross-restart persistence**: `.api_usage.json` file maintains usage across program runs
+- **Real-time rate limiting**: Automatic throttling to respect 15/minute, 1,500/day limits
+- **Historical analysis**: 7-day usage tracking with automatic cleanup
+- **Status reporting**: Detailed usage statistics and remaining quotas
+
+**Monitoring Commands:**
+```bash
+# Current usage status
+python pdf_renamer.py --status
+
+# Weekly breakdown analysis
+python pdf_renamer.py --weekly-summary
+
+# Emergency counter reset
+python pdf_renamer.py --reset-counter
+```
+
+**Sample Output:**
+```
+📊 Rate Limit Status:
+  Today: 23/1500 (1477 remaining)
+  This minute: 2/15 (13 remaining)
+  Total lifetime requests: 156
+
+📈 Recent Usage (last 7 days):
+    2025-06-02: 45 requests
+    2025-06-03: 67 requests
+    2025-06-04: 23 requests
+```
+
+#### Advanced Monitoring (Enterprise Option)
+For organizations requiring enhanced monitoring capabilities, **Google Cloud Monitoring** integration is available:
+
+**Setup Requirements:**
+1. **Google Cloud Project**: GCP project with billing enabled
+2. **Cloud Monitoring API**: Enable monitoring service
+3. **Service Account**: Create credentials for programmatic access
+4. **Dependencies**: Install `google-cloud-monitoring` package
+
+**Implementation Overview:**
+```python
+from google.cloud import monitoring_v3
+from datetime import datetime, timedelta
+
+def get_daily_api_usage(project_id: str, credentials_path: str) -> int:
+    """Get daily API request count from Google Cloud Monitoring."""
+    client = monitoring_v3.MetricServiceClient.from_service_account_file(credentials_path)
+    project_name = f"projects/{project_id}"
+    
+    # Query for API request count metric
+    interval = monitoring_v3.TimeInterval({
+        "end_time": {"seconds": int(datetime.now().timestamp())},
+        "start_time": {"seconds": int((datetime.now() - timedelta(days=1)).timestamp())}
+    })
+    
+    results = client.list_time_series(
+        request={
+            "name": project_name,
+            "filter": 'metric.type="serviceruntime.googleapis.com/api/request_count"',
+            "interval": interval
+        }
+    )
+    
+    return sum(point.value.int64_value for result in results for point in result.points)
+```
+
+**MQL Query Example:**
+```mql
+fetch consumed_api
+| metric 'serviceruntime.googleapis.com/api/request_count'
+| filter (resource.service == 'aiplatform.googleapis.com')
+| group_by 1d, [row_count: row_count()]
+| every 1d
+```
+
+**Comparison Matrix:**
+
+| Feature | Built-in Persistent | Google Cloud Monitoring |
+|---------|-------------------|------------------------|
+| **Setup** | ✅ No setup needed | ❌ Complex GCP setup |
+| **Cost** | ✅ Free | ❌ Usage-based charges |
+| **Accuracy** | ✅ Real-time | ❌ May have 5min delay |
+| **Multi-device** | ❌ Single machine | ✅ Cross-device sync |
+| **Privacy** | ✅ Local data only | ❌ Cloud-based |
+| **Dashboards** | ❌ CLI only | ✅ Rich visualizations |
+| **Alerting** | ❌ Manual checking | ✅ Automated alerts |
+| **Enterprise** | ❌ Basic features | ✅ Advanced analytics |
+
+**Implementation Decision Framework:**
+- **Use Built-in Monitoring** for: Single-user setups, privacy requirements, simple usage tracking
+- **Use Cloud Monitoring** for: Multi-user environments, enterprise compliance, advanced analytics needs
+
+#### Additional Monitoring Metrics
+- **Error Rate Monitoring**: Failure pattern analysis via log files
+- **Performance Metrics**: Processing time tracking per file
+- **Success Rate Reporting**: Accuracy measurements and validation
 
 ---
 
@@ -323,7 +482,39 @@ Where:
 ### 12.2 Supported Collectors
 SUEZ, VEOLIA, REFOOD, PAPREC, ELISE, DERICHEBOURG, ORTEC, ATESIS, BRANGEON, COLLECTEA, and others as defined in Prestataires.csv
 
-### 12.3 Error Codes
+### 12.3 API Usage Tracking Files
+
+#### Local Storage File: `.api_usage.json`
+```json
+{
+  "daily_requests": {
+    "2025-06-04": 23,
+    "2025-06-03": 67,
+    "2025-06-02": 45
+  },
+  "minute_requests": [
+    "2025-06-04T13:19:43.313122",
+    "2025-06-04T13:18:32.124567"
+  ],
+  "last_updated": "2025-06-04T13:20:12.585203"
+}
+```
+
+**Features:**
+- Automatic creation and management
+- Git-ignored for privacy
+- 7-day data retention with automatic cleanup
+- Cross-restart persistence
+
+#### Environment Variables for Cloud Monitoring
+```bash
+# Optional: Google Cloud Monitoring integration
+GOOGLE_CLOUD_PROJECT_ID=your-project-id
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+ENABLE_CLOUD_MONITORING=false
+```
+
+### 12.5 Error Codes
 - **E001**: PDF text extraction failure
 - **E002**: AI analysis timeout or failure
 - **E003**: Restaurant/site matching failure

@@ -64,22 +64,58 @@ Where:
 
 ## Usage
 
-### Basic Usage (Recommended - with .env file)
+### Basic Commands
 
 ```bash
+# Check API usage status
+python3 pdf_renamer.py --status
+
+# Get weekly usage summary  
+python3 pdf_renamer.py --weekly-summary
+
+# Dry run (test without renaming)
+python3 pdf_renamer.py "/path/to/invoice/directory" --dry-run
+
+# Process files for real
 python3 pdf_renamer.py "/path/to/invoice/directory"
 ```
 
-### Start with Dry Run (Recommended)
+### Advanced Commands
 
 ```bash
-python3 pdf_renamer.py "/path/to/invoice/directory" --dry-run
+# Reset today's counter (use with caution)
+python3 pdf_renamer.py --reset-counter
+
+# Use specific CSV directory
+python3 pdf_renamer.py "/path/to/invoices" --csv-dir "/path/to/csv/files"
+
+# Override API key (not recommended for security)
+python3 pdf_renamer.py "/path/to/invoices" --api-key "your-api-key"
 ```
 
-### Alternative: Direct API Key (Not Recommended for Security)
+### Rate Limiting & Persistent Tracking
 
+The script automatically tracks API usage across program runs using a local `.api_usage.json` file:
+
+- **Persistent Counter**: Remembers API calls across program restarts
+- **Historical Data**: Tracks daily usage for the past 7 days  
+- **Automatic Cleanup**: Removes old data to keep storage minimal
+- **Rate Limiting**: Respects Google Gemini free tier limits (15/minute, 1,500/day)
+
+> 📋 **Advanced Monitoring**: For enterprise users needing Google Cloud Monitoring integration, see the [Product Requirements Document (PRD.md)](PRD.md#93-monitoring--usage-tracking) for detailed implementation guidance.
+
+Example status output:
 ```bash
-python3 pdf_renamer.py "/path/to/invoice/directory" --api-key "your-gemini-api-key"
+$ python3 pdf_renamer.py --status
+📊 Rate Limit Status:
+  Today: 23/1500 (1477 remaining)
+  This minute: 2/15 (13 remaining)
+  Total lifetime requests: 156
+
+📈 Recent Usage (last 7 days):
+    2025-06-02: 45 requests
+    2025-06-03: 67 requests
+    2025-06-04: 23 requests
 ```
 
 ## Command Line Options
