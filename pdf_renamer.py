@@ -1089,7 +1089,8 @@ class PDFRenamer:
             'skipped': []
         }
         
-        pdf_files = list(directory.glob('*.pdf'))
+        # Pick up all PDFs, case-insensitive (.pdf or .PDF)
+        pdf_files = [f for f in directory.iterdir() if f.is_file() and f.suffix.lower() == '.pdf']
         
         # Log processing start
         rate_status = self.get_rate_limit_status()
