@@ -7,10 +7,10 @@ Site-Collecte(+CS/BIO/DIB)-InvoiceMonthYear-InvoiceNumber
 
 import os
 import re
-import csv
 import json
 import logging
 import time
+import csv
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
@@ -18,6 +18,8 @@ import PyPDF2
 import google.generativeai as genai
 import argparse
 from dotenv import load_dotenv
+import pandas as pd
+from difflib import SequenceMatcher
 
 # Load environment variables
 load_dotenv()
@@ -465,24 +467,47 @@ class PDFRenamer:
         # Load data from CSV files
         self.restaurants_data = self._load_restaurants_data()
         self.prestataires_data = self._load_prestataires_data()
+        self.valid_collectors = self._load_valid_collectors()
         
         # Create lookup dictionaries for faster matching
         self.restaurant_lookup = self._create_restaurant_lookup()
         
     def _load_restaurants_data(self) -> List[Dict]:
-        """Load restaurant data from CSV file."""
+        """Load restaurant data from Excel file only."""
         restaurants = []
-        csv_path = self.csv_dir / "Restaurants.csv"
+        excel_path = self.csv_dir / "Liste des clients.xlsx"
         
-        with open(csv_path, 'r', encoding='utf-8-sig') as file:  # Handle BOM
-            reader = csv.DictReader(file, delimiter=';')
-            for row in reader:
-                # Clean up column names (remove spaces)
-                cleaned_row = {k.strip(): v.strip() for k, v in row.items()}
-                restaurants.append(cleaned_row)
-        
-        logger.info(f"Loaded {len(restaurants)} restaurant entries")
-        return restaurants
+        try:
+            # Load Excel file
+            df = pd.read_excel(excel_path)
+            
+            # Handle column spacing issues and normalize column names
+            df.columns = df.columns.str.strip()
+            
+            # Expected columns: Code client, Nom, Adresse
+            # Map to our expected format
+            for _, row in df.iterrows():
+                # Handle "Code client " with trailing space
+                site_number = row.get('Code client') or row.get('Code client ')
+                restaurant_name = row.get('Nom', '').strip()
+                address = row.get('Adresse', '').strip()
+                
+                if pd.notna(site_number) and pd.notna(restaurant_name):
+                    restaurants.append({
+                        'Site': str(int(site_number)),  # Convert to string, remove decimal
+                        'Nom': restaurant_name,
+                        'Adresse': address
+                    })
+            
+            logger.info(f"Loaded {len(restaurants)} restaurant entries from Excel")
+            return restaurants
+            
+        except Exception as e:
+            logger.error(f"Critical error loading Excel file {excel_path}: {e}")
+            logger.error("Excel file is required - CSV fallback has been deprecated")
+            raise RuntimeError(f"Could not load required Excel file: {excel_path}. Please ensure the file exists and is accessible.")
+    
+
     
     def _load_prestataires_data(self) -> Dict[str, List[str]]:
         """Load prestataires data from CSV file."""
@@ -499,15 +524,130 @@ class PDFRenamer:
         logger.info(f"Loaded prestataires data for {len(prestataires)} collecte types")
         return prestataires
     
+    def _load_valid_collectors(self) -> set:
+        """Load valid collector names from Prestataires.csv for validation."""
+        valid_collectors = set()
+        csv_path = self.csv_dir / "Prestataires.csv"
+        
+        try:
+            with open(csv_path, 'r', encoding='utf-8-sig') as file:
+                reader = csv.DictReader(file, delimiter=';')
+                for row in reader:
+                    collecte = row['Collecte'].strip()
+                    if collecte:  # Skip empty rows
+                        valid_collectors.add(collecte)
+            
+            logger.info(f"Loaded {len(valid_collectors)} valid collectors for validation")
+            return valid_collectors
+            
+        except Exception as e:
+            logger.error(f"Error loading valid collectors: {e}")
+            return set()
+    
+    def _validate_collector(self, extracted_collector: str, base_collector: str) -> bool:
+        """Validate that the base collector is in our valid collectors list."""
+        if base_collector not in self.valid_collectors:
+            logger.warning(f"❌ Invalid collector '{base_collector}' extracted from '{extracted_collector}'")
+            logger.info(f"📋 Valid collectors: {sorted(list(self.valid_collectors))}")
+            return False
+        
+        logger.info(f"✅ Collector '{base_collector}' is valid")
+        return True
+    
+    def _extract_valid_collectors(self) -> List[str]:
+        """Extract unique collectors from Prestataires.csv for validation."""
+        return list(self.prestataires_data.keys())
+    
+    def _normalize_address(self, address: str) -> str:
+        """Normalize address for matching by handling common abbreviations."""
+        if not address:
+            return ""
+        
+        address = address.lower().strip()
+        
+        # Common French address normalizations
+        address_mappings = {
+            'avenue': 'av',
+            'av.': 'av',
+            'boulevard': 'bd',
+            'bd.': 'bd',
+            'rue': 'r',
+            'place': 'pl',
+            'pl.': 'pl',
+            'saint': 'st',
+            'sainte': 'ste',
+            'st.': 'st',
+            'ste.': 'ste'
+        }
+        
+        # Apply normalizations
+        for full_form, abbrev in address_mappings.items():
+            address = re.sub(r'\b' + full_form + r'\b', abbrev, address)
+        
+        # Remove extra spaces and punctuation
+        address = re.sub(r'[^\w\s]', '', address)
+        address = re.sub(r'\s+', ' ', address).strip()
+        
+        return address
+    
+    def _calculate_address_similarity(self, addr1: str, addr2: str) -> float:
+        """Calculate similarity between two addresses."""
+        norm_addr1 = self._normalize_address(addr1)
+        norm_addr2 = self._normalize_address(addr2)
+        
+        if not norm_addr1 or not norm_addr2:
+            return 0.0
+        
+        # Use sequence matcher for similarity
+        return SequenceMatcher(None, norm_addr1, norm_addr2).ratio()
+    
+    def _find_address_matches(self, restaurant_name: str, address: str, threshold: float = 0.7) -> List[Dict]:
+        """Find restaurants matching both name and address with fallback to address-only matching."""
+        matches = []
+        
+        # First try exact name matches with address validation
+        for restaurant in self.restaurants_data:
+            if self._is_similar_restaurant_name(restaurant_name.lower(), restaurant['Nom'].lower()):
+                addr_similarity = self._calculate_address_similarity(address, restaurant.get('Adresse', ''))
+                if addr_similarity >= threshold:
+                    matches.append({
+                        'restaurant': restaurant,
+                        'address_similarity': addr_similarity,
+                        'match_type': 'name_and_address'
+                    })
+        
+        # If no good matches, try address-only matching for same name restaurants
+        if not matches:
+            name_matches = []
+            for restaurant in self.restaurants_data:
+                if self._is_similar_restaurant_name(restaurant_name.lower(), restaurant['Nom'].lower()):
+                    name_matches.append(restaurant)
+            
+            # If multiple restaurants with same name, try to match by address
+            if len(name_matches) > 1:
+                for restaurant in name_matches:
+                    addr_similarity = self._calculate_address_similarity(address, restaurant.get('Adresse', ''))
+                    if addr_similarity >= 0.5:  # Lower threshold for fallback
+                        matches.append({
+                            'restaurant': restaurant,
+                            'address_similarity': addr_similarity,
+                            'match_type': 'address_fallback'
+                        })
+        
+        # Sort by address similarity (best matches first)
+        matches.sort(key=lambda x: x['address_similarity'], reverse=True)
+        return matches
+    
     def _create_restaurant_lookup(self) -> Dict[str, List[Dict]]:
         """Create a lookup dictionary for faster restaurant matching."""
         lookup = {}
         
         for restaurant in self.restaurants_data:
-            entreprise = restaurant['Entreprise'].lower()
+            # Excel structure (Excel file has 'Nom' field)
+            restaurant_name = restaurant['Nom'].lower()
             
             # Create various normalized versions for McDonald's variations
-            normalized_names = self._normalize_restaurant_name(entreprise)
+            normalized_names = self._normalize_restaurant_name(restaurant_name)
             
             for name in normalized_names:
                 if name not in lookup:
@@ -579,13 +719,15 @@ class PDFRenamer:
         Analyze this French invoice text and extract the following information in JSON format:
         
         1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
-        2. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
-        3. invoice_date: The invoice date in DD/MM/YYYY format
-        4. invoice_number: The invoice number (usually alphanumeric)
-        5. waste_types: Array of waste types found (look for DIB, BIO, CS, DECHET RECYCLABLE, etc.)
+        2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
+        3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
+        4. invoice_date: The invoice date in DD/MM/YYYY format
+        5. invoice_number: The invoice number (usually alphanumeric)
+        6. waste_types: Array of waste types found (look for DIB, BIO, CS, DECHET RECYCLABLE, etc.)
         
         Important notes:
         - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
+        - Extract the restaurant address if visible - this helps identify the specific location
         - Look for waste type indicators like "DIB", "BIO", "CS", "DECHET RECYCLABLE" (CS), "Déchets recyclables" (CS)
         - The invoice provider is usually the company issuing the invoice
         - Be very careful with the invoice number - it's usually prominently displayed
@@ -620,35 +762,72 @@ class PDFRenamer:
             self.processing_logger.log_api_request(filename, False, {"error": str(e)})
             return {}
     
-    def _find_restaurant_site(self, entreprise_name: str, collecte: str) -> Optional[str]:
-        """Find the site number for a restaurant and collecte combination."""
+    def _find_restaurant_site(self, entreprise_name: str, collecte: str, restaurant_address: str = "") -> Optional[str]:
+        """Find the site number for a restaurant using Excel-based matching with address fallback."""
         normalized_name = entreprise_name.lower().strip()
         
-        # Try direct lookup first
-        if normalized_name in self.restaurant_lookup:
-            candidates = self.restaurant_lookup[normalized_name]
-        else:
-            # Try fuzzy matching for McDonald's variations
-            candidates = []
-            for lookup_name, restaurants in self.restaurant_lookup.items():
-                if self._is_similar_restaurant_name(normalized_name, lookup_name):
-                    candidates.extend(restaurants)
+        # First try: Name-based matching (from Excel data)
+        name_matches = []
+        for restaurant in self.restaurants_data:
+            restaurant_name = restaurant.get('Nom', '').lower()
+            if self._is_similar_restaurant_name(normalized_name, restaurant_name):
+                name_matches.append(restaurant)
         
-        # Filter by collecte and sort candidates to prefer simpler/generic names
-        matching_candidates = []
-        for restaurant in candidates:
-            if restaurant['Collecte'].upper() == collecte.upper():
-                matching_candidates.append(restaurant)
+        # If no Excel matches found, try address-based matching if address provided
+        if not name_matches and restaurant_address:
+            logger.info(f"No name matches found for '{entreprise_name}', trying address matching...")
+            address_matches = self._find_address_matches(entreprise_name, restaurant_address)
+            if address_matches:
+                # Use the best address match
+                best_match = address_matches[0]['restaurant']
+                site_number = best_match.get('Site', best_match.get('Code client'))
+                if site_number:
+                    logger.info(f"Found via address matching: {entreprise_name} -> Site {site_number}")
+                    return str(site_number)
         
-        if not matching_candidates:
+        # If still no matches, skip (don't fall back to CSV)
+        if not name_matches:
+            logger.warning(f"No restaurant matches found for '{entreprise_name}' - skipping file")
             return None
-            
-        # Sort candidates by name length (prefer shorter, more generic names)
-        # This helps "MAC DO CHALON" match to "Mcdonald's CHALON SUR SAONE" (site 1173)
-        # instead of "Mcdonald's CHALON SUR SAONE OBELISQUE" (site 161)
-        matching_candidates.sort(key=lambda x: len(x['Entreprise']))
         
-        return matching_candidates[0]['Site']
+        # Filter name matches by collecte if available (for Excel data, collecte is not part of the row)
+        # Since Excel doesn't have collecte column, we validate against Prestataires.csv separately
+        valid_collectors = self._extract_valid_collectors()
+        if collecte.upper() not in [c.upper() for c in valid_collectors]:
+            logger.warning(f"Invalid collecte '{collecte}' not found in Prestataires.csv")
+            return None
+        
+        # Multiple name matches - use address to disambiguate if provided
+        if len(name_matches) > 1 and restaurant_address:
+            logger.info(f"Multiple name matches found for '{entreprise_name}', using address to disambiguate...")
+            
+            best_match = None
+            best_similarity = 0.0
+            
+            for restaurant in name_matches:
+                addr_similarity = self._calculate_address_similarity(
+                    restaurant_address, 
+                    restaurant.get('Adresse', '')
+                )
+                if addr_similarity > best_similarity:
+                    best_similarity = addr_similarity
+                    best_match = restaurant
+            
+            if best_match and best_similarity > 0.5:  # Minimum threshold
+                site_number = best_match.get('Site', best_match.get('Code client'))
+                if site_number:
+                    logger.info(f"Address disambiguation successful: {entreprise_name} -> Site {site_number} (similarity: {best_similarity:.2f})")
+                    return str(site_number)
+        
+        # If single match or no address disambiguation possible, return first match
+        if name_matches:
+            # Sort by name length (prefer shorter, more generic names)
+            name_matches.sort(key=lambda x: len(x.get('Nom', '')))
+            site_number = name_matches[0].get('Site', name_matches[0].get('Code client'))
+            if site_number:
+                return str(site_number)
+        
+        return None
     
     def _is_similar_restaurant_name(self, name1: str, name2: str) -> bool:
         """Check if two restaurant names are similar (for fuzzy matching)."""
@@ -667,7 +846,8 @@ class PDFRenamer:
                 return location1 in location2 or location2 in location1 or \
                        any(word in location2.split() for word in location1.split() if len(word) > 2)
         
-        return False
+        # For non-McDonald's restaurants, check for direct name similarity
+        return name1_clean == name2_clean or name1_clean in name2_clean or name2_clean in name1_clean
     
     def _determine_collecte_suffix(self, collecte: str, waste_types: List[str]) -> str:
         """Determine the collecte suffix based on waste types found."""
@@ -759,6 +939,7 @@ class PDFRenamer:
         invoice_date = analysis.get('invoice_date', '')
         invoice_number = analysis.get('invoice_number', '')
         waste_types = analysis.get('waste_types', [])
+        restaurant_address = analysis.get('restaurant_address', '')
         
         if not all([entreprise, invoice_provider, invoice_date, invoice_number]):
             logger.error(f"Missing required information for {pdf_path}")
@@ -771,10 +952,15 @@ class PDFRenamer:
             logger.error(f"Could not find base collecte name for provider '{invoice_provider}'")
             return None
         
+        # Validate that the collector is in our valid collectors list
+        if not self._validate_collector(invoice_provider, base_collecte):
+            logger.error(f"Skipping file: Invalid collector '{base_collecte}' not in approved collectors list")
+            return None
+        
         logger.info(f"Base collecte name: {base_collecte}")
         
         # Find site number using the base collecte name
-        site_number = self._find_restaurant_site(entreprise, base_collecte)
+        site_number = self._find_restaurant_site(entreprise, base_collecte, restaurant_address)
         if not site_number:
             logger.error(f"Could not find site number for {entreprise} with collecte {base_collecte}")
             return None
@@ -819,6 +1005,7 @@ class PDFRenamer:
         invoice_date = analysis.get('invoice_date', '')
         invoice_number = analysis.get('invoice_number', '')
         waste_types = analysis.get('waste_types', [])
+        restaurant_address = analysis.get('restaurant_address', '')
         
         # Prepare detailed extraction data
         extracted_data = {
@@ -827,6 +1014,7 @@ class PDFRenamer:
             'invoice_date': invoice_date,
             'invoice_number': invoice_number,
             'waste_types': waste_types,
+            'restaurant_address': restaurant_address,
             'raw_analysis': analysis
         }
         
@@ -853,10 +1041,16 @@ class PDFRenamer:
             extracted_data['available_providers'] = list(self.prestataires_data.keys())
             return None, extracted_data
         
+        # Validate that the collector is in our valid collectors list
+        if not self._validate_collector(invoice_provider, base_collecte):
+            extracted_data['error'] = f"Invalid collector '{base_collecte}' not in approved collectors list"
+            extracted_data['valid_collectors'] = sorted(list(self.valid_collectors))
+            return None, extracted_data
+        
         extracted_data['base_collecte'] = base_collecte
         
         # Find site number using the base collecte name
-        site_number = self._find_restaurant_site(entreprise, base_collecte)
+        site_number = self._find_restaurant_site(entreprise, base_collecte, restaurant_address)
         if not site_number:
             extracted_data['error'] = f"Could not find site number for '{entreprise}' with collecte '{base_collecte}'"
             # Find similar restaurant names for debugging

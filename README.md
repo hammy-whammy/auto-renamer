@@ -4,10 +4,12 @@ Automatically renames PDF invoices based on their content using AI analysis and 
 
 ## Features
 
-- **AI-Powered Content Analysis**: Uses Google Gemini to extract key information from invoice PDFs
+- **AI-Powered Content Analysis**: Uses Google Gemini to extract key information from invoice PDFs including restaurant addresses
+- **Excel-Based Restaurant Matching**: Primary data source from `Liste des clients.xlsx` with intelligent address-based disambiguation
+- **Address-Aware Matching**: Extracts restaurant addresses from invoices to resolve conflicts when multiple locations share the same name
 - **Intelligent Restaurant Matching**: Handles various McDonald's name variations (MAC DO, McDonald's, etc.)
 - **Waste Type Detection**: Automatically detects DIB, BIO, CS waste types from invoice content
-- **CSV-Based Lookup**: Cross-references restaurant and prestataire data for accurate site numbers
+- **CSV-Based Lookup**: Cross-references prestataire data for accurate collecte information
 - **Safe Operation**: Includes dry-run mode to preview changes before execution
 - **Enhanced Logging System**: 
   - Detailed file-by-file processing logs
@@ -28,16 +30,36 @@ Site-Collecte(+CS/BIO/DIB)-InvoiceMonthYear-InvoiceNumber.pdf
 - Renamed: `1173-SUEZBIODIBCS-092024-H0E0228333.pdf`
 
 Where:
-- `1173` = Site number from Restaurants.csv
+- `1173` = Site number from Liste des clients.xlsx
 - `SUEZBIODIBCS` = Collecte provider + waste types (DIB + BIO + CS)
 - `092024` = Invoice month/year (September 2024)
 - `H0E0228333` = Invoice number
 
+## Restaurant Matching Algorithm
+
+The system uses a sophisticated multi-step approach for restaurant matching:
+
+1. **Excel-First Approach**: Primary data source is `Liste des clients.xlsx` containing 900+ restaurant locations with addresses
+2. **Name-Based Matching**: Finds restaurants with similar names using fuzzy matching algorithms
+3. **Address Disambiguation**: When multiple restaurants share the same name, uses extracted addresses to find the correct location
+4. **Similarity Scoring**: Calculates address similarity scores to select the best match
+5. **Fallback Protection**: Handles edge cases gracefully with detailed error reporting
+
+### Address Extraction
+
+The Gemini AI extracts structured address information from invoices:
+- Street address
+- Postal code  
+- City name
+- Combined into normalized format for matching
+
 ## Requirements
 
 - Python 3.7+
-- Google Gemini API key
-- Required CSV files: `Restaurants.csv`, `Prestataires.csv`
+- Google Gemini API key  
+- Required data files: 
+  - `Liste des clients.xlsx` (primary restaurant database)
+  - `Prestataires.csv` (collecte provider information)
 
 ## Installation
 
@@ -220,8 +242,8 @@ After processing, the script provides a comprehensive summary:
    - Try using a different PDF reader/converter
 
 2. **"Could not find site number"**
-   - Restaurant name may not match CSV data exactly
-   - Check if the restaurant exists in Restaurants.csv
+   - Restaurant name may not match Excel data exactly
+   - Check if the restaurant exists in Liste des clients.xlsx
    - Verify the collecte provider name
 
 3. **"Missing required information"**
@@ -236,29 +258,47 @@ After processing, the script provides a comprehensive summary:
 ### Validation Steps
 
 1. **Always run dry-run first** to preview changes
-2. **Check the log output** for any warnings or errors
+2. **Check the log output** for any warnings or errors  
 3. **Verify a few renamed files manually** to ensure accuracy
 4. **Keep backups** of original files
+
+## Testing
+
+The system includes comprehensive tests to validate Excel-based restaurant matching:
+
+```bash
+# Test Excel loading and address matching functionality
+python test_excel_matching.py
+```
+
+This test validates:
+- ✅ Excel file loading with correct data structure
+- ✅ Address-based restaurant disambiguation 
+- ✅ Name similarity matching algorithms
 
 ## File Structure
 
 ```
 auto-renamer/
 ├── pdf_renamer.py          # Main script
-├── requirements.txt        # Python dependencies
-├── setup.sh               # Setup script
+├── requirements.txt        # Python dependencies  
+├── setup_env.sh           # Environment setup script
 ├── README.md              # This file
-├── Restaurants.csv        # Restaurant/site data
-└── Prestataires.csv       # Collecte provider data
+├── Liste des clients.xlsx # Primary restaurant database (Excel)
+├── Prestataires.csv       # Collecte provider data
+├── test_excel_matching.py # Excel functionality tests
+└── logs/                  # Processing logs and reports
 ```
 
-## CSV File Format
+## Data File Formats
 
-### Restaurants.csv
-```csv
-Site; Entreprise; Collecte; Collecte en cours
-1173;Mcdonald's CHALON SUR SAONE;SUEZ;OUI
-```
+### Liste des clients.xlsx (Primary)
+Excel file with columns:
+- `Code client`: Site number (primary key)
+- `Nom`: Restaurant name  
+- `Adresse`: Street address
+- `CP`: Postal code
+- `Ville`: City name
 
 ### Prestataires.csv
 ```csv
@@ -271,7 +311,7 @@ SUEZ;SUEZDIBBIO,SUEZBIO,SUEZDIBCS,SUEZDIB,SUEZBIODIBCS;
 For issues or questions:
 1. Check the troubleshooting section above
 2. Review the log output for specific error messages
-3. Ensure your CSV files are properly formatted
+3. Ensure your Excel files are properly formatted
 4. Verify your API key is working
 
 ## Security Notes
