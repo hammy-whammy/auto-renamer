@@ -1287,7 +1287,7 @@ def main():
         return
     
     # Check for required CSV files
-    required_files = ['Restaurants.csv', 'Prestataires.csv']
+    required_files = ['Liste des clients.xlsx', 'Prestataires.csv']
     for file in required_files:
         if not (csv_dir / file).exists():
             logger.error(f"Required CSV file not found: {csv_dir / file}")
