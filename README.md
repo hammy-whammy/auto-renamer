@@ -7,6 +7,7 @@ Automatically renames PDF invoices based on their content using AI analysis and 
 - **AI-Powered Content Analysis**: Uses Google Gemini to extract key information from invoice PDFs including restaurant addresses
 - **Excel-Based Restaurant Matching**: Primary data source from `Liste des clients.xlsx` with intelligent address-based disambiguation
 - **Address-Aware Matching**: Extracts restaurant addresses from invoices to resolve conflicts when multiple locations share the same name
+- **Smart Address Detection**: Automatically handles special cases where company address (SOCIETE RUBO/34 BOULEVARD DES ITALIENS) is shown instead of restaurant address - looks for secondary addresses in such cases
 - **Intelligent Restaurant Matching**: Handles various McDonald's name variations (MAC DO, McDonald's, etc.)
 - **Waste Type Detection**: Automatically detects DIB, BIO, CS waste types from invoice content
 - **CSV-Based Lookup**: Cross-references prestataire data for accurate collecte information
@@ -52,6 +53,8 @@ The Gemini AI extracts structured address information from invoices:
 - Postal code  
 - City name
 - Combined into normalized format for matching
+
+**Special Case Handling**: The system intelligently handles invoices where "SOCIETE RUBO" with address "34 BOULEVARD DES ITALIENS" appears. In these cases, the AI recognizes this as the company's address (not the restaurant) and automatically looks for a secondary address elsewhere in the document that represents the actual restaurant location.
 
 ## Requirements
 
