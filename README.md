@@ -40,11 +40,12 @@ Where:
 
 The system uses a sophisticated multi-step approach for restaurant matching:
 
-1. **Excel-First Approach**: Primary data source is `Liste des clients.xlsx` containing 900+ restaurant locations with addresses
+1. **Excel-First Approach**: Primary data source is `Liste des clients.xlsx` containing 900+ restaurant locations with addresses and postal codes
 2. **Name-Based Matching**: Finds restaurants with similar names using fuzzy matching algorithms
 3. **Address Disambiguation**: When multiple restaurants share the same name, uses extracted addresses to find the correct location
-4. **Similarity Scoring**: Calculates address similarity scores to select the best match
-5. **Fallback Protection**: Handles edge cases gracefully with detailed error reporting
+4. **Postal Code Fallback**: If name and address matching fails, uses postal code matching as a final fallback method
+5. **Similarity Scoring**: Calculates address similarity scores to select the best match
+6. **Fallback Protection**: Handles edge cases gracefully with detailed error reporting
 
 ### Address Extraction
 
@@ -55,6 +56,17 @@ The Gemini AI extracts structured address information from invoices:
 - Combined into normalized format for matching
 
 **Special Case Handling**: The system intelligently handles invoices where "SOCIETE RUBO" with address "34 BOULEVARD DES ITALIENS" appears. In these cases, the AI recognizes this as the company's address (not the restaurant) and automatically looks for a secondary address elsewhere in the document that represents the actual restaurant location.
+
+### Postal Code Matching
+
+When primary name and address matching fails, the system uses postal code matching as a final fallback:
+
+1. **Extraction**: Automatically extracts 5-digit French postal codes from invoice addresses
+2. **Matching**: Finds all restaurants in the database with the same postal code
+3. **Name Similarity**: If a restaurant name hint is available, ranks matches by name similarity
+4. **Fallback Success**: Successfully resolves cases where restaurant names are unclear but location is identifiable
+
+**Example**: An invoice for "Restaurant Marzy" with address "Unknown street, 58180 Marzy" will match "McDonald's Nevers Marzy" (Site 199) based on the postal code 58180 and the "Marzy" name similarity.
 
 ## Requirements
 

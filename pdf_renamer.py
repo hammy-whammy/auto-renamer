@@ -484,19 +484,21 @@ class PDFRenamer:
             # Handle column spacing issues and normalize column names
             df.columns = df.columns.str.strip()
             
-            # Expected columns: Code client, Nom, Adresse
+            # Expected columns: Code client, Nom, Adresse, CP
             # Map to our expected format
             for _, row in df.iterrows():
                 # Handle "Code client " with trailing space
                 site_number = row.get('Code client') or row.get('Code client ')
                 restaurant_name = row.get('Nom', '').strip()
                 address = row.get('Adresse', '').strip()
+                postal_code = row.get('CP', '')
                 
                 if pd.notna(site_number) and pd.notna(restaurant_name):
                     restaurants.append({
                         'Site': str(int(site_number)),  # Convert to string, remove decimal
                         'Nom': restaurant_name,
-                        'Adresse': address
+                        'Adresse': address,
+                        'CP': str(postal_code).strip() if pd.notna(postal_code) else ''
                     })
             
             logger.info(f"Loaded {len(restaurants)} restaurant entries from Excel")
@@ -768,40 +770,120 @@ class PDFRenamer:
             self.processing_logger.log_api_request(filename, False, {"error": str(e)})
             return {}
     
-    def _find_restaurant_site(self, entreprise_name: str, collecte: str, restaurant_address: str = "") -> Optional[str]:
-        """Find the site number for a restaurant using Excel-based matching with address fallback."""
-        normalized_name = entreprise_name.lower().strip()
+    def _extract_postal_code(self, address: str) -> Optional[str]:
+        """Extract postal code from an address string."""
+        if not address:
+            return None
         
-        # First try: Name-based matching (from Excel data)
-        name_matches = []
+        # French postal codes are 5 digits
+        postal_code_match = re.search(r'\b(\d{5})\b', address)
+        if postal_code_match:
+            return postal_code_match.group(1)
+        
+        return None
+    
+    def _find_postal_code_matches(self, invoice_postal_code: str, restaurant_name: str = "") -> List[Dict]:
+        """Find restaurants matching postal code with optional name similarity."""
+        matches = []
+        
+        if not invoice_postal_code:
+            return matches
+        
         for restaurant in self.restaurants_data:
-            restaurant_name = restaurant.get('Nom', '').lower()
-            if self._is_similar_restaurant_name(normalized_name, restaurant_name):
-                name_matches.append(restaurant)
+            # Check if restaurant has CP (Code Postal) field
+            restaurant_postal_code = restaurant.get('CP', '')
+            if str(restaurant_postal_code) == invoice_postal_code:
+                # If restaurant name provided, check for name similarity as well
+                name_similarity = 0.0
+                if restaurant_name:
+                    restaurant_name_clean = restaurant.get('Nom', '').lower()
+                    # Check for partial name matches (like "Marzy" in "Nevers Marzy")
+                    name_parts = restaurant_name.lower().split()
+                    for part in name_parts:
+                        if part in restaurant_name_clean:
+                            name_similarity = 1.0
+                            break
+                    
+                    # Also check reverse (restaurant name parts in invoice name)
+                    if name_similarity == 0.0:
+                        restaurant_parts = restaurant_name_clean.split()
+                        for part in restaurant_parts:
+                            if part in restaurant_name.lower():
+                                name_similarity = 0.8
+                                break
+                
+                matches.append({
+                    'restaurant': restaurant,
+                    'name_similarity': name_similarity,
+                    'match_type': 'postal_code'
+                })
         
-        # If no Excel matches found, try address-based matching if address provided
+        # Sort by name similarity (if restaurant name provided), otherwise just return all matches
+        if restaurant_name:
+            matches.sort(key=lambda x: x['name_similarity'], reverse=True)
+        
+        return matches
+
+    def _find_restaurant_site(self, entreprise_name: str, collecte: str, restaurant_address: str = "") -> Tuple[Optional[str], Optional[str]]:
+        """Find the site number and restaurant name using Excel-based matching with address fallback.
+        
+        Returns:
+            Tuple[Optional[str], Optional[str]]: (site_number, restaurant_name) or (None, None) if not found
+        """
+        normalized_name = entreprise_name.lower().strip() if entreprise_name else ""
+        
+        # First try: Name-based matching (from Excel data) - skip if no name provided
+        name_matches = []
+        if normalized_name:
+            for restaurant in self.restaurants_data:
+                restaurant_name = restaurant.get('Nom', '').lower()
+                if self._is_similar_restaurant_name(normalized_name, restaurant_name):
+                    name_matches.append(restaurant)
+        
+        # If no name provided or no Excel matches found, try address-based matching if address provided
         if not name_matches and restaurant_address:
-            logger.info(f"No name matches found for '{entreprise_name}', trying address matching...")
-            address_matches = self._find_address_matches(entreprise_name, restaurant_address)
+            if not normalized_name:
+                logger.info(f"No restaurant name provided, trying address matching with '{restaurant_address}'...")
+            else:
+                logger.info(f"No name matches found for '{entreprise_name}', trying address matching...")
+            address_matches = self._find_address_matches(entreprise_name or "Unknown", restaurant_address)
             if address_matches:
                 # Use the best address match
                 best_match = address_matches[0]['restaurant']
                 site_number = best_match.get('Site', best_match.get('Code client'))
+                matched_name = best_match.get('Nom', '')
                 if site_number:
-                    logger.info(f"Found via address matching: {entreprise_name} -> Site {site_number}")
-                    return str(site_number)
+                    logger.info(f"Found via address matching: {entreprise_name} -> {matched_name} (Site {site_number})")
+                    return str(site_number), matched_name
         
-        # If still no matches, skip (don't fall back to CSV)
+        # If still no matches, try postal code matching as final fallback
+        if not name_matches and restaurant_address:
+            invoice_postal_code = self._extract_postal_code(restaurant_address)
+            if invoice_postal_code:
+                search_desc = f"'{entreprise_name}'" if entreprise_name else "restaurant address"
+                logger.info(f"No name/address matches found for {search_desc}, trying postal code matching with {invoice_postal_code}...")
+                postal_matches = self._find_postal_code_matches(invoice_postal_code, entreprise_name or "")
+                if postal_matches:
+                    # Use the best postal code match (highest name similarity)
+                    best_match = postal_matches[0]['restaurant']
+                    site_number = best_match.get('Site', best_match.get('Code client'))
+                    matched_name = best_match.get('Nom', '')
+                    if site_number:
+                        logger.info(f"Found via postal code matching: {search_desc} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
+                        return str(site_number), matched_name
+        
+        # If still no matches, skip
         if not name_matches:
-            logger.warning(f"No restaurant matches found for '{entreprise_name}' - skipping file")
-            return None
+            search_info = f"'{entreprise_name}'" if entreprise_name else f"address '{restaurant_address}'"
+            logger.warning(f"No restaurant matches found for {search_info} - skipping file")
+            return None, None
         
         # Filter name matches by collecte if available (for Excel data, collecte is not part of the row)
         # Since Excel doesn't have collecte column, we validate against Prestataires.csv separately
         valid_collectors = self._extract_valid_collectors()
         if collecte.upper() not in [c.upper() for c in valid_collectors]:
             logger.warning(f"Invalid collecte '{collecte}' not found in Prestataires.csv")
-            return None
+            return None, None
         
         # Multiple name matches - use address to disambiguate if provided
         if len(name_matches) > 1 and restaurant_address:
@@ -821,19 +903,35 @@ class PDFRenamer:
             
             if best_match and best_similarity > 0.5:  # Minimum threshold
                 site_number = best_match.get('Site', best_match.get('Code client'))
+                matched_name = best_match.get('Nom', '')
                 if site_number:
-                    logger.info(f"Address disambiguation successful: {entreprise_name} -> Site {site_number} (similarity: {best_similarity:.2f})")
-                    return str(site_number)
+                    logger.info(f"Address disambiguation successful: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f})")
+                    return str(site_number), matched_name
+            
+            # If address disambiguation failed, try postal code matching with name matches
+            invoice_postal_code = self._extract_postal_code(restaurant_address)
+            if invoice_postal_code:
+                logger.info(f"Address disambiguation failed, trying postal code matching with {invoice_postal_code}...")
+                for restaurant in name_matches:
+                    restaurant_postal_code = restaurant.get('CP', '')
+                    if str(restaurant_postal_code) == invoice_postal_code:
+                        site_number = restaurant.get('Site', restaurant.get('Code client'))
+                        matched_name = restaurant.get('Nom', '')
+                        if site_number:
+                            logger.info(f"Postal code match found: {entreprise_name} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
+                            return str(site_number), matched_name
         
         # If single match or no address disambiguation possible, return first match
         if name_matches:
             # Sort by name length (prefer shorter, more generic names)
             name_matches.sort(key=lambda x: len(x.get('Nom', '')))
-            site_number = name_matches[0].get('Site', name_matches[0].get('Code client'))
+            first_match = name_matches[0]
+            site_number = first_match.get('Site', first_match.get('Code client'))
+            matched_name = first_match.get('Nom', '')
             if site_number:
-                return str(site_number)
+                return str(site_number), matched_name
         
-        return None
+        return None, None
     
     def _is_similar_restaurant_name(self, name1: str, name2: str) -> bool:
         """Check if two restaurant names are similar (for fuzzy matching)."""
@@ -966,7 +1064,7 @@ class PDFRenamer:
         logger.info(f"Base collecte name: {base_collecte}")
         
         # Find site number using the base collecte name
-        site_number = self._find_restaurant_site(entreprise, base_collecte, restaurant_address)
+        site_number, matched_restaurant_name = self._find_restaurant_site(entreprise, base_collecte, restaurant_address)
         if not site_number:
             logger.error(f"Could not find site number for {entreprise} with collecte {base_collecte}")
             return None
@@ -1026,8 +1124,9 @@ class PDFRenamer:
         
         # Validate required fields
         missing_fields = []
-        if not entreprise:
-            missing_fields.append('entreprise')
+        # Allow entreprise to be missing if we have restaurant_address for postal code matching
+        if not entreprise and not restaurant_address:
+            missing_fields.append('entreprise (no address available for fallback matching)')
         if not invoice_provider:
             missing_fields.append('invoice_provider')
         if not invoice_date:
@@ -1055,23 +1154,31 @@ class PDFRenamer:
         
         extracted_data['base_collecte'] = base_collecte
         
-        # Find site number using the base collecte name
-        site_number = self._find_restaurant_site(entreprise, base_collecte, restaurant_address)
+        # Find site number and restaurant name using the base collecte name
+        site_number, matched_restaurant_name = self._find_restaurant_site(entreprise or "", base_collecte, restaurant_address)
         if not site_number:
-            extracted_data['error'] = f"Could not find site number for '{entreprise}' with collecte '{base_collecte}'"
+            # Determine what to show in error message
+            search_term = entreprise if entreprise else f"address: {restaurant_address}"
+            extracted_data['error'] = f"Could not find site number for '{search_term}' with collecte '{base_collecte}'"
             # Find similar restaurant names for debugging
             similar_restaurants = []
             for restaurant in self.restaurants_data:
-                if any(word in restaurant['Entreprise'].lower() for word in entreprise.lower().split() if len(word) > 2):
+                restaurant_name = restaurant.get('Nom', '')
+                if entreprise and any(word in restaurant_name.lower() for word in entreprise.lower().split() if len(word) > 2):
                     similar_restaurants.append({
-                        'name': restaurant['Entreprise'],
-                        'site': restaurant['Site'],
-                        'collecte': restaurant['Collecte']
+                        'name': restaurant_name,
+                        'site': restaurant.get('Site', restaurant.get('Code client')),
+                        'collecte': base_collecte
                     })
             extracted_data['similar_restaurants'] = similar_restaurants[:5]  # Top 5 matches
             return None, extracted_data
         
         extracted_data['site_number'] = site_number
+        
+        # Update restaurant name if we found a match via fallback methods
+        if matched_restaurant_name and not entreprise:
+            extracted_data['restaurant_name'] = matched_restaurant_name
+            logger.info(f"Updated restaurant name from fallback matching: {matched_restaurant_name}")
         
         # Determine collecte suffix using the base collecte name
         collecte_suffix = self._determine_collecte_suffix(base_collecte, waste_types)
