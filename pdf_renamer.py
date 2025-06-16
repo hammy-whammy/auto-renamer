@@ -715,10 +715,10 @@ class PDFRenamer:
             logger.error(f"Error extracting text from {pdf_path}: {e}")
             return ""
     
-    def _analyze_invoice_with_gemini(self, pdf_text: str, filename: str = "unknown") -> Dict:
+    def _analyze_invoice_with_gemini(self, pdf_path: Path, filename: str = "unknown") -> Dict:
         """Use Gemini to analyze invoice content and extract key information."""
-        prompt = f"""
-        Analyze this French invoice text and extract the following information in JSON format:
+        prompt = """
+        Analyze this French invoice PDF and extract the following information in JSON format:
         
         1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
         2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
@@ -739,9 +739,8 @@ class PDFRenamer:
         - Look for waste type indicators like "DIB", "BIO", "CS", "DECHET RECYCLABLE" (CS), "Déchets recyclables" (CS)
         - The invoice provider is usually the company issuing the invoice
         - Be very careful with the invoice number - it's usually prominently displayed
-        
-        Invoice text:
-        {pdf_text}
+        - CRITICAL: Look for company logos in the image! Sometimes the invoice provider will not be listed explicitly via text, in this case you MUST use the logos to identify the provider (e.g., SUEZ logo, VEOLIA logo, PAPREC logo) and use that as the invoice_provider
+        - Give priority to logos over text when determining the invoice provider - if you see a PAPREC logo but text mentions "RUBO", the correct provider is PAPREC
         
         Return only valid JSON:
         """
@@ -750,8 +749,48 @@ class PDFRenamer:
             # Wait if necessary to respect rate limits
             self.rate_limiter.wait_if_needed(self.processing_logger)
             
-            # Make the API call
-            response = self.model.generate_content(prompt)
+            # Convert PDF to image for Gemini analysis
+            pdf_image = self._convert_pdf_to_image(pdf_path)
+            if pdf_image is None:
+                # Fallback to text extraction if image conversion fails
+                pdf_text = self._extract_pdf_text(pdf_path)
+                if not pdf_text:
+                    logger.error(f"Could not extract text or convert to image from {pdf_path}")
+                    return {}
+                
+                # Use text-based analysis as fallback
+                text_prompt = f"""
+                Analyze this French invoice text and extract the following information in JSON format:
+                
+                1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
+                2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
+                3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
+                4. invoice_date: The invoice date in DD/MM/YYYY format
+                5. invoice_number: The invoice number (usually alphanumeric)
+                6. waste_types: Array of waste types found (look for DIB, BIO, CS, DECHET RECYCLABLE, etc.)
+                
+                Important notes:
+                - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
+                - Extract the restaurant address if visible - this helps identify the specific location
+                - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
+                  1. Look for a SECONDARY address elsewhere in the invoice that represents the actual restaurant location
+                  2. Use that secondary address as the restaurant_address
+                  3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
+                  4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
+                - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
+                - Look for waste type indicators like "DIB", "BIO", "CS", "DECHET RECYCLABLE" (CS), "Déchets recyclables" (CS)
+                - The invoice provider is usually the company issuing the invoice
+                - Be very careful with the invoice number - it's usually prominently displayed
+                
+                Invoice text:
+                {pdf_text}
+                
+                Return only valid JSON:
+                """
+                response = self.model.generate_content(text_prompt)
+            else:
+                # Use image-based analysis
+                response = self.model.generate_content([prompt, pdf_image])
             
             # Clean the response to extract JSON
             response_text = response.text.strip()
@@ -764,11 +803,30 @@ class PDFRenamer:
             
             result = json.loads(response_text)
             self.processing_logger.log_api_request(filename, True, result)
+            
             return result
         except Exception as e:
             logger.error(f"Error analyzing invoice with Gemini: {e}")
             self.processing_logger.log_api_request(filename, False, {"error": str(e)})
             return {}
+    
+    def _convert_pdf_to_image(self, pdf_path: Path):
+        """Convert the first page of a PDF to an image for Gemini analysis."""
+        try:
+            import pdf2image
+            from PIL import Image
+            
+            # Convert first page of PDF to image
+            images = pdf2image.convert_from_path(pdf_path, first_page=1, last_page=1)
+            if images:
+                return images[0]  # Return PIL Image object
+            return None
+        except ImportError:
+            logger.warning("pdf2image not available, falling back to text extraction")
+            return None
+        except Exception as e:
+            logger.warning(f"Could not convert PDF to image: {e}, falling back to text extraction")
+            return None
     
     def _extract_postal_code(self, address: str) -> Optional[str]:
         """Extract postal code from an address string."""
@@ -1023,14 +1081,8 @@ class PDFRenamer:
         """Generate new filename for a PDF based on its content."""
         logger.info(f"Processing: {pdf_path}")
         
-        # Extract text from PDF
-        pdf_text = self._extract_pdf_text(pdf_path)
-        if not pdf_text:
-            logger.error(f"Could not extract text from {pdf_path}")
-            return None
-        
         # Analyze with Gemini
-        analysis = self._analyze_invoice_with_gemini(pdf_text)
+        analysis = self._analyze_invoice_with_gemini(pdf_path, pdf_path.name)
         if not analysis:
             logger.error(f"Could not analyze invoice content for {pdf_path}")
             return None
@@ -1094,7 +1146,7 @@ class PDFRenamer:
             return None, error_details
         
         # Analyze with Gemini
-        analysis = self._analyze_invoice_with_gemini(pdf_text, pdf_path.name)
+        analysis = self._analyze_invoice_with_gemini(pdf_path, pdf_path.name)
         if not analysis:
             error_details = {
                 'error': 'Could not analyze invoice content',
