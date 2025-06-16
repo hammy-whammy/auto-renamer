@@ -5,6 +5,8 @@ Automatically renames PDF invoices based on their content using AI analysis and 
 ## Features
 
 - **AI-Powered Content Analysis**: Uses Google Gemini to extract key information from invoice PDFs including restaurant addresses
+- **Visual Logo Recognition**: Advanced image-based analysis that identifies company logos (PAPREC, SUEZ, VEOLIA, etc.) when text-based extraction fails
+- **Hybrid Analysis System**: Primary image analysis with text extraction fallback for maximum accuracy
 - **Excel-Based Restaurant Matching**: Primary data source from `Liste des clients.xlsx` with intelligent address-based disambiguation
 - **Address-Aware Matching**: Extracts restaurant addresses from invoices to resolve conflicts when multiple locations share the same name
 - **Smart Address Detection**: Automatically handles special cases where company address (SOCIETE RUBO/34 BOULEVARD DES ITALIENS) is shown instead of restaurant address - looks for secondary addresses in such cases
@@ -68,6 +70,36 @@ When primary name and address matching fails, the system uses postal code matchi
 
 **Example**: An invoice for "Restaurant Marzy" with address "Unknown street, 58180 Marzy" will match "McDonald's Nevers Marzy" (Site 199) based on the postal code 58180 and the "Marzy" name similarity.
 
+## Logo Recognition System
+
+The system features advanced visual logo recognition capabilities:
+
+### How Logo Recognition Works
+
+1. **PDF-to-Image Conversion**: Converts the first page of each PDF to a high-resolution image
+2. **Visual Analysis**: Sends the image to Google Gemini's multimodal AI for visual inspection
+3. **Logo Detection**: Identifies company logos including:
+   - PAPREC
+   - SUEZ  
+   - VEOLIA
+   - And other waste management providers
+4. **Priority System**: Logo identification takes priority over text-based provider extraction
+
+### When Logo Recognition is Critical
+
+- **Invoices with Mixed Branding**: When invoices show company logos but mention different text (e.g., PAPREC logo with "RUBO" text)
+- **Poor Text Quality**: When PDF text extraction produces unclear or incomplete provider information
+- **Visual-Heavy Invoices**: Documents where logos are more prominent than text
+
+### Fallback System
+
+If logo recognition fails:
+1. **Automatic Fallback**: System automatically falls back to text-based extraction
+2. **Error Logging**: Logs the fallback reason for troubleshooting
+3. **Graceful Degradation**: No functionality is lost when image processing is unavailable
+
+**Example Success**: The PAPREC test invoice with "RUBO" text is correctly identified as a PAPREC invoice due to the visible PAPREC logo, resulting in proper filename generation: `1036-PAPREC-102024-PRE24100414.pdf`
+
 ## Requirements
 
 - Python 3.7+
@@ -75,6 +107,9 @@ When primary name and address matching fails, the system uses postal code matchi
 - Required data files: 
   - `Liste des clients.xlsx` (primary restaurant database)
   - `Prestataires.csv` (collecte provider information)
+- System dependencies for PDF processing:
+  - `pdf2image` (for PDF-to-image conversion)
+  - `Pillow` (for image processing)
 
 ## Installation
 
@@ -203,18 +238,20 @@ $ python3 pdf_renamer.py --status
 
 ## How It Works
 
-1. **PDF Text Extraction**: Extracts text from the first page of each PDF
-2. **AI Analysis**: Uses Google Gemini to identify:
-   - Restaurant/company name
-   - Invoice provider (collecte)
+1. **PDF Processing**: Converts PDF first page to image for visual analysis (with text extraction fallback)
+2. **AI Analysis**: Uses Google Gemini's multimodal capabilities to identify:
+   - Company logos (PAPREC, SUEZ, VEOLIA, etc.) for accurate provider identification
+   - Restaurant/company name from text or visual context
+   - Invoice provider (collecte) with logo priority over text
    - Invoice date
    - Invoice number
    - Waste types (DIB, BIO, CS)
-3. **Data Lookup**: Cross-references extracted data with CSV files to find:
+3. **Logo Recognition**: Prioritizes visual logo identification over text-based provider extraction
+4. **Data Lookup**: Cross-references extracted data with CSV files to find:
    - Site number from restaurant name and collecte
    - Valid waste type combinations
-4. **Filename Generation**: Creates new filename following the required format
-5. **Safe Renaming**: Renames files (or shows preview in dry-run mode)
+5. **Filename Generation**: Creates new filename following the required format
+6. **Safe Renaming**: Renames files (or shows preview in dry-run mode)
 
 ## Supported Restaurant Name Variations
 

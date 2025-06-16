@@ -2,10 +2,10 @@
 ## PDF Invoice Renamer - Automated Invoice Processing System
 
 ### Document Information
-- **Version**: 1.0
-- **Date**: June 4, 2025
+- **Version**: 1.1
+- **Date**: June 16, 2025
 - **Author**: Development Team
-- **Status**: Implementation Complete
+- **Status**: Updated with Logo Recognition Implementation
 
 ---
 
@@ -22,8 +22,10 @@ The PDF Invoice Renamer is an intelligent automation tool that processes waste m
 
 ### 1.3 Solution
 An automated Python-based system that:
-- Extracts text from PDF invoices using OCR
-- Analyzes content using Google Gemini AI to identify key information
+- Extracts text and visual content from PDF invoices using PDF-to-image conversion
+- Analyzes content using Google Gemini AI's multimodal capabilities to identify key information
+- Recognizes company logos (PAPREC, SUEZ, VEOLIA, etc.) for accurate provider identification
+- Prioritizes visual logo recognition over text-based provider extraction
 - Matches restaurant/site data against a comprehensive database
 - Generates standardized filenames following the format: `Site-Collecte(+WasteTypes)-MonthYear-InvoiceNumber.pdf`
 
@@ -75,22 +77,36 @@ An automated Python-based system that:
 
 ### 4.1 Core Features
 
-#### F1: PDF Text Extraction
-- **Requirement**: Extract text content from PDF invoices (first page only for cost optimization)
+#### F1: PDF Processing with Visual Analysis
+- **Requirement**: Process PDF invoices using both visual and text-based analysis
 - **Input**: PDF file path
-- **Output**: Extracted text string
+- **Output**: Image representation + extracted text string
+- **Features**:
+  - PDF-to-image conversion for visual analysis
+  - Text extraction as fallback method
+  - First page processing only for cost optimization
 - **Constraints**: Must handle various PDF formats and encoding
 
-#### F2: AI-Powered Content Analysis
-- **Requirement**: Use Google Gemini AI to analyze invoice content
-- **Input**: Extracted PDF text
+#### F2: AI-Powered Multimodal Content Analysis
+- **Requirement**: Use Google Gemini AI's multimodal capabilities to analyze invoice content
+- **Input**: PDF image (primary) or extracted text (fallback)
 - **Output**: Structured JSON with:
   - Company name (entreprise)
-  - Invoice provider/collector
+  - Invoice provider/collector (with logo recognition priority)
   - Invoice date (DD/MM/YYYY format)
   - Invoice number
   - Waste types array
+- **Features**:
+  - Visual logo recognition for provider identification
+  - Logo priority over text-based provider extraction
+  - Hybrid fallback system for reliability
 - **Constraints**: Must respect API rate limits (15/minute, 1500/day)
+
+#### F2.1: Logo Recognition System
+- **Requirement**: Identify waste management company logos visually
+- **Supported Logos**: PAPREC, SUEZ, VEOLIA, and other waste management providers
+- **Priority**: Logo identification takes precedence over text-based provider extraction
+- **Fallback**: Automatic degradation to text-only analysis if image processing fails
 
 #### F3: Restaurant/Site Matching
 - **Requirement**: Match extracted company names to site numbers using CSV database
@@ -209,19 +225,22 @@ An automated Python-based system that:
 #### Dependencies
 - **Python 3.8+**: Core runtime
 - **PyPDF2**: PDF text extraction
-- **google-generativeai**: AI content analysis
+- **google-generativeai**: AI content analysis with multimodal capabilities
 - **pandas**: CSV data manipulation
 - **python-dotenv**: Environment configuration
+- **pdf2image**: PDF-to-image conversion for visual analysis
+- **Pillow (PIL)**: Image processing and manipulation
 
 ### 6.2 Data Flow
 1. PDF file input
-2. Text extraction (first page only)
-3. AI analysis via Gemini API
-4. Restaurant/site matching against CSV data
-5. Collector name resolution
-6. Waste type classification
-7. Filename generation
-8. File renaming (or dry-run preview)
+2. **PDF-to-image conversion** for visual analysis (with text extraction fallback)
+3. **Multimodal AI analysis** via Gemini API (image + text)
+4. **Logo recognition** for provider identification (priority over text)
+5. Restaurant/site matching against CSV data
+6. Collector name resolution
+7. Waste type classification
+8. Filename generation
+9. File renaming (or dry-run preview)
 
 ### 6.3 Rate Limiting & API Management
 
@@ -526,9 +545,15 @@ cat logs/pdf_renaming_*.json | jq '.summary | {success_rate: (.successful/.total
 
 ### 9.1 Installation Requirements
 - Python 3.8+ runtime environment
-- Required Python packages (via requirements.txt)
-- Google Gemini API key
-- Access to CSV database files
+- Required Python packages (via requirements.txt):
+  - PyPDF2==3.0.1 (PDF text extraction)
+  - google-generativeai==0.3.2 (AI analysis)
+  - pdf2image==1.17.0 (PDF-to-image conversion)
+  - Pillow==10.0.1 (image processing)
+  - python-dotenv==1.0.0 (environment configuration)
+  - pandas (CSV data manipulation)
+- Google Gemini API key with multimodal capabilities
+- Access to CSV database files (Liste des clients.xlsx, Prestataires.csv)
 
 ### 9.2 Configuration
 - Environment variable setup (.env file)
@@ -694,6 +719,20 @@ Where:
 
 ### 12.2 Supported Collectors
 SUEZ, VEOLIA, REFOOD, PAPREC, ELISE, DERICHEBOURG, ORTEC, ATESIS, BRANGEON, COLLECTEA, and others as defined in Prestataires.csv
+
+### 12.2.1 Logo Recognition Capabilities
+The system's visual analysis can identify the following company logos:
+- **PAPREC**: Green and white logo with company name
+- **SUEZ**: Blue corporate logo design
+- **VEOLIA**: Green corporate branding and logo
+- **Other Waste Management Providers**: Additional logos as defined in Prestataires.csv
+
+**Logo Priority System**: When both text and logo information are available, the system prioritizes logo identification for provider determination. For example, if an invoice shows "RUBO" in the text but displays a PAPREC logo, the system correctly identifies PAPREC as the provider.
+
+**Example Success Case**: 
+- **Input**: PAPREC PDF with "RUBO" text content
+- **Logo Detection**: PAPREC logo identified visually
+- **Output**: `1036-PAPREC-102024-PRE24100414.pdf` (correct provider)
 
 ### 12.3 Enhanced Logging System
 
