@@ -737,6 +737,7 @@ class PDFRenamer:
           4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
         - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
         - Look for waste type indicators like "DIB", "BIO", "CS", "DECHET RECYCLABLE" (CS), "Déchets recyclables" (CS)
+        - CRITICAL: Only "Déchets recyclables" should be classified as CS. "Déchets NON recyclables" should NOT be classified as CS or DECHET RECYCLABLE
         - The invoice provider is usually the company issuing the invoice
         - Be very careful with the invoice number - it's usually prominently displayed
         - CRITICAL: Look for company logos in the image! Sometimes the invoice provider will not be listed explicitly via text, in this case you MUST use the logos to identify the provider (e.g., SUEZ logo, VEOLIA logo, PAPREC logo) and use that as the invoice_provider
@@ -779,6 +780,7 @@ class PDFRenamer:
                   4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
                 - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
                 - Look for waste type indicators like "DIB", "BIO", "CS", "DECHET RECYCLABLE" (CS), "Déchets recyclables" (CS)
+                - CRITICAL: Only "Déchets recyclables" should be classified as CS. "Déchets NON recyclables" should NOT be classified as CS or DECHET RECYCLABLE
                 - The invoice provider is usually the company issuing the invoice
                 - Be very careful with the invoice number - it's usually prominently displayed
                 

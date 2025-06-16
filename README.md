@@ -100,6 +100,18 @@ If logo recognition fails:
 
 **Example Success**: The PAPREC test invoice with "RUBO" text is correctly identified as a PAPREC invoice due to the visible PAPREC logo, resulting in proper filename generation: `1036-PAPREC-102024-PRE24100414.pdf`
 
+## Workflow Diagram
+
+![Workflow Diagram](workflow_diagram_clean.png)
+
+The complete user workflow illustrates the enhanced processing pipeline with visual logo recognition capabilities. Key highlights:
+
+- **Multimodal Processing**: PDF-to-image conversion enables visual analysis
+- **Logo Recognition Priority**: Visual logos override text-based provider identification  
+- **Intelligent Fallback**: Automatic degradation to text analysis if image processing fails
+- **Enhanced Error Handling**: Detailed logging and debugging information
+- **Real-time Monitoring**: Progress tracking and API usage management
+
 ## Requirements
 
 - Python 3.7+
