@@ -61,6 +61,7 @@ Thumbs.db
 # Tests
 tests/
 test_pdfs/
+renamed/
 
 # Backup files
 *.bak
