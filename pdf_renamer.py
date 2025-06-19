@@ -1134,19 +1134,15 @@ class PDFRenamer:
     
     def generate_new_filename_with_details(self, pdf_path: Path) -> Tuple[Optional[str], Dict]:
         """Generate new filename for a PDF and return detailed extraction data."""
-        # Extract text from PDF
-        pdf_text = self._extract_pdf_text(pdf_path)
-        if not pdf_text:
+        # Analyze with Gemini (includes both image and text extraction fallbacks)
+        analysis = self._analyze_invoice_with_gemini(pdf_path, pdf_path.name)
+        if not analysis:
             error_details = {
-                'error': 'Could not extract text from PDF',
+                'error': 'Gemini analysis failed or returned no data',
                 'pdf_size': f"{pdf_path.stat().st_size} bytes",
                 'file_extension': pdf_path.suffix
             }
             return None, error_details
-        
-        # Analyze with Gemini
-        analysis = self._analyze_invoice_with_gemini(pdf_path, pdf_path.name)
-        if not analysis:
             error_details = {
                 'error': 'Could not analyze invoice content',
                 'pdf_text_length': len(pdf_text),
