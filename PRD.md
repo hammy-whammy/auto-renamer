@@ -18,7 +18,6 @@ The PDF Invoice Renamer is an intelligent automation tool that processes waste m
 - Manual invoice processing is time-consuming and error-prone
 - Inconsistent file naming conventions make document retrieval difficult
 - Need for automated extraction of invoice metadata (site, provider, date, invoice number)
-- Requirement to categorize waste types (DIB, BIO, CS) for regulatory compliance
 
 ### 1.3 Solution
 An automated Python-based system that:
@@ -27,7 +26,7 @@ An automated Python-based system that:
 - Recognizes company logos (PAPREC, SUEZ, VEOLIA, etc.) for accurate provider identification
 - Prioritizes visual logo recognition over text-based provider extraction
 - Matches restaurant/site data against a comprehensive database
-- Generates standardized filenames following the format: `Site-Collecte(+WasteTypes)-MonthYear-InvoiceNumber.pdf`
+- Generates standardized filenames following the format: `Site-Collecte-MonthYear-InvoiceNumber.pdf`
 
 ---
 
@@ -37,7 +36,6 @@ An automated Python-based system that:
 1. **Automation**: Reduce manual invoice processing time by 95%
 2. **Accuracy**: Achieve 98%+ accuracy in filename generation
 3. **Standardization**: Ensure consistent naming convention across all invoices
-4. **Compliance**: Proper categorization of waste types for regulatory requirements
 
 ### 2.2 Success Metrics
 - **Processing Speed**: Process 100+ invoices per hour
@@ -52,7 +50,6 @@ An automated Python-based system that:
 ### 3.1 Primary Users
 - **Operations Staff**: Process daily invoice batches
 - **Finance Team**: Organize invoices for accounting and auditing
-- **Compliance Officers**: Ensure proper waste type categorization
 
 ### 3.2 Use Cases
 
@@ -95,7 +92,6 @@ An automated Python-based system that:
   - Invoice provider/collector (with logo recognition priority)
   - Invoice date (DD/MM/YYYY format)
   - Invoice number
-  - Waste types array
 - **Features**:
   - Visual logo recognition for provider identification
   - Logo priority over text-based provider extraction
@@ -123,23 +119,15 @@ An automated Python-based system that:
   - Support for major collectors: SUEZ, VEOLIA, REFOOD, PAPREC, etc.
 - **Data Source**: Prestataires.csv (52 collector types)
 
-#### F5: Waste Type Classification
-- **Requirement**: Identify and categorize waste types from invoice content
-- **Supported Types**:
-  - **DIB**: Déchets Industriels Banals
-  - **BIO**: Biodegradable waste
-  - **CS**: Collecte Sélective (recyclable waste)
-- **Output**: Combined waste type suffix (e.g., DIBCS, BIOCS, DIBBIOCS)
-
-#### F6: Filename Generation
+#### F5: Filename Generation
 - **Requirement**: Generate standardized filenames
-- **Format**: `{Site}-{Collecte}{WasteTypes}-{MMYYYY}-{InvoiceNumber}.pdf`
+- **Format**: `{Site}-{Collecte}-{MMYYYY}-{InvoiceNumber}.pdf`
 - **Examples**:
-  - `1173-SUEZDIBBIOCS-092024-H0E0228333.pdf`
+  - `1173-SUEZ-092024-H0E0228333.pdf`
   - `1332-REFOOD-102024-41371683 RI.pdf`
-  - `322-SUEZDIBCS-102024-F7EF196665.pdf`
+  - `322-SUEZ-102024-F7EF196665.pdf`
 
-#### F7: Batch Processing
+#### F6: Batch Processing
 - **Requirement**: Process multiple PDF files in a directory
 - **Features**:
   - Progress tracking and logging
@@ -147,7 +135,7 @@ An automated Python-based system that:
   - Summary reporting
   - Dry-run mode for validation
 
-#### F8: Enhanced Logging System
+#### F7: Enhanced Logging System
 - **Requirement**: Comprehensive logging and monitoring for transparent processing insights
 - **Features**:
   - **Structured Console Output**: Real-time progress with detailed status updates
@@ -163,16 +151,16 @@ An automated Python-based system that:
 
 ### 4.2 Data Management
 
-#### F9: CSV Data Integration
+#### F8: CSV Data Integration
 - **Restaurants.csv**:
   - Columns: Site, Entreprise, Collecte
   - 443 restaurant entries
   - UTF-8 with BOM encoding support
 - **Prestataires.csv**:
   - Columns: Collecte, Combinations
-  - 52 collector types with valid waste combinations
+  - 52 collector types
 
-#### F10: Configuration Management
+#### F9: Configuration Management
 - **Environment Variables**:
   - `GEMINI_API_KEY`: Google Gemini API authentication
   - `MAX_REQUESTS_PER_MINUTE`: Rate limiting (default: 15)
@@ -238,7 +226,6 @@ An automated Python-based system that:
 4. **Logo recognition** for provider identification (priority over text)
 5. Restaurant/site matching against CSV data
 6. Collector name resolution
-7. Waste type classification
 8. Filename generation
 9. File renaming (or dry-run preview)
 
@@ -325,12 +312,11 @@ The system includes a comprehensive **ProcessingLogger** that provides transpare
 
 --------------------------------------------------
 Processing file 1/3: invoice_sample.pdf
-✅ SUCCESS: Would rename 'invoice_sample.pdf' → '1173-SUEZBIODIBCS-092024-H0E0228333.pdf'
+✅ SUCCESS: Would rename 'invoice_sample.pdf' → '1173-SUEZ-092024-H0E0228333.pdf'
    📊 Extracted data:
      Restaurant: MAC DO CHALON
      Site: 1173
-     Collecte: SUEZBIODIBCS
-     Waste types: DIB, BIO, CS
+     Collecte: SUEZ
      Invoice #: H0E0228333
      Date: 30/09/2024
 ```
@@ -342,7 +328,7 @@ Processing file 1/3: invoice_sample.pdf
 2025-06-04 15:03:04 | INFO     | ================================================================================
 2025-06-04 15:03:04 | INFO     | Session ID: 20250604_150304
 2025-06-04 15:03:04 | INFO     | Processing file 1/5: invoice_001.pdf
-2025-06-04 15:03:05 | INFO     | ✅ SUCCESS: Would rename 'invoice_001.pdf' → '1173-SUEZBIODIBCS-092024-H0E0228333.pdf'
+2025-06-04 15:03:05 | INFO     | ✅ SUCCESS: Would rename 'invoice_001.pdf' → '1173-SUEZ-092024-H0E0228333.pdf'
 2025-06-04 15:03:05 | ERROR    | ❌ FAILED: invoice_002.pdf
 2025-06-04 15:03:05 | ERROR    |    Reason: Could not find site number for 'BURGER KING LYON' with collecte 'VEOLIA'
 2025-06-04 15:03:05 | ERROR    |    Details: similar_restaurants: [{'name': 'Burger King LYON', 'site': '2145', 'collecte': 'SUEZ'}]
@@ -368,12 +354,11 @@ Processing file 1/3: invoice_sample.pdf
     {
       "status": "success",
       "original_name": "invoice_001.pdf",
-      "new_name": "1173-SUEZBIODIBCS-092024-H0E0228333.pdf",
+      "new_name": "1173-SUEZ-092024-H0E0228333.pdf",
       "extracted_data": {
         "restaurant_name": "MAC DO CHALON",
         "site_number": "1173",
-        "collecte": "SUEZBIODIBCS",
-        "waste_types": ["DIB", "BIO", "CS"],
+        "collecte": "SUEZ",
         "invoice_number": "H0E0228333",
         "invoice_date": "30/09/2024"
       }
@@ -681,7 +666,6 @@ fetch consumed_api
 ### 10.2 Business Risks
 - **Processing Accuracy**: Comprehensive testing and validation
 - **User Adoption**: Training and documentation
-- **Compliance Requirements**: Waste type classification accuracy
 - **Data Security**: Secure API key management
 
 ---
@@ -707,12 +691,11 @@ fetch consumed_api
 ### 12.1 File Format Specification
 ```
 Target Filename Format:
-{Site}-{Collecte}{WasteTypes}-{MMYYYY}-{InvoiceNumber}.pdf
+{Site}-{Collecte}-{MMYYYY}-{InvoiceNumber}.pdf
 
 Where:
 - Site: 3-4 digit restaurant site number
 - Collecte: Base collector name (SUEZ, REFOOD, etc.)
-- WasteTypes: Combination of DIB, BIO, CS
 - MMYYYY: Invoice month and year
 - InvoiceNumber: Original invoice identifier
 ```
@@ -746,12 +729,11 @@ The system's visual analysis can identify the following company logos:
 
 --------------------------------------------------
 Processing file 1/3: invoice_sample.pdf
-✅ SUCCESS: Would rename 'invoice_sample.pdf' → '1173-SUEZBIODIBCS-092024-H0E0228333.pdf'
+✅ SUCCESS: Would rename 'invoice_sample.pdf' → '1173-SUEZ-092024-H0E0228333.pdf'
    📊 Extracted data:
      Restaurant: MAC DO CHALON
      Site: 1173
-     Collecte: SUEZBIODIBCS
-     Waste types: DIB, BIO, CS
+     Collecte: SUEZ
      Invoice #: H0E0228333
      Date: 30/09/2024
 ```
@@ -763,7 +745,7 @@ Processing file 1/3: invoice_sample.pdf
 2025-06-04 15:03:04 | INFO     | ================================================================================
 2025-06-04 15:03:04 | INFO     | Session ID: 20250604_150304
 2025-06-04 15:03:04 | INFO     | Processing file 1/5: invoice_001.pdf
-2025-06-04 15:03:05 | INFO     | ✅ SUCCESS: Would rename 'invoice_001.pdf' → '1173-SUEZBIODIBCS-092024-H0E0228333.pdf'
+2025-06-04 15:03:05 | INFO     | ✅ SUCCESS: Would rename 'invoice_001.pdf' → '1173-SUEZ-092024-H0E0228333.pdf'
 2025-06-04 15:03:05 | ERROR    | ❌ FAILED: invoice_002.pdf
 2025-06-04 15:03:05 | ERROR    |    Reason: Could not find site number for 'BURGER KING LYON' with collecte 'VEOLIA'
 ```
@@ -788,12 +770,11 @@ Processing file 1/3: invoice_sample.pdf
     {
       "status": "success",
       "original_name": "invoice_001.pdf",
-      "new_name": "1173-SUEZBIODIBCS-092024-H0E0228333.pdf",
+      "new_name": "1173-SUEZ-092024-H0E0228333.pdf",
       "extracted_data": {
         "restaurant_name": "MAC DO CHALON",
         "site_number": "1173",
-        "collecte": "SUEZBIODIBCS",
-        "waste_types": ["DIB", "BIO", "CS"],
+        "collecte": "SUEZ",
         "invoice_number": "H0E0228333",
         "invoice_date": "30/09/2024"
       },

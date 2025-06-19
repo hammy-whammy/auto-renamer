@@ -11,7 +11,6 @@ Automatically renames PDF invoices based on their content using AI analysis and 
 - **Address-Aware Matching**: Extracts restaurant addresses from invoices to resolve conflicts when multiple locations share the same name
 - **Smart Address Detection**: Automatically handles special cases where company address (SOCIETE RUBO/34 BOULEVARD DES ITALIENS) is shown instead of restaurant address - looks for secondary addresses in such cases
 - **Intelligent Restaurant Matching**: Handles various McDonald's name variations (MAC DO, McDonald's, etc.)
-- **Waste Type Detection**: Automatically detects DIB, BIO, CS waste types from invoice content
 - **CSV-Based Lookup**: Cross-references prestataire data for accurate collecte information
 - **Safe Operation**: Includes dry-run mode to preview changes before execution
 - **Enhanced Logging System**: 
@@ -25,16 +24,16 @@ Automatically renames PDF invoices based on their content using AI analysis and 
 
 Files are renamed using the following format:
 ```
-Site-Collecte(+CS/BIO/DIB)-InvoiceMonthYear-InvoiceNumber.pdf
+Site-Collecte-InvoiceMonthYear-InvoiceNumber.pdf
 ```
 
 ### Example
 - Original: `invoice_123.pdf`
-- Renamed: `1173-SUEZBIODIBCS-092024-H0E0228333.pdf`
+- Renamed: `1173-SUEZ-092024-H0E0228333.pdf`
 
 Where:
 - `1173` = Site number from Liste des clients.xlsx
-- `SUEZBIODIBCS` = Collecte provider + waste types (DIB + BIO + CS)
+- `SUEZ` = Collecte provider
 - `092024` = Invoice month/year (September 2024)
 - `H0E0228333` = Invoice number
 
@@ -149,7 +148,7 @@ The complete user workflow illustrates the enhanced processing pipeline with vis
 
 4. **Ensure CSV files are present**:
    - `Restaurants.csv` - Restaurant site mapping
-   - `Prestataires.csv` - Waste collector combinations
+   - `Prestataires.csv` - Waste collectors
 
 ## Usage
 
@@ -257,11 +256,9 @@ $ python3 pdf_renamer.py --status
    - Invoice provider (collecte) with logo priority over text
    - Invoice date
    - Invoice number
-   - Waste types (DIB, BIO, CS)
 3. **Logo Recognition**: Prioritizes visual logo identification over text-based provider extraction
 4. **Data Lookup**: Cross-references extracted data with CSV files to find:
    - Site number from restaurant name and collecte
-   - Valid waste type combinations
 5. **Filename Generation**: Creates new filename following the required format
 6. **Safe Renaming**: Renames files (or shows preview in dry-run mode)
 
@@ -275,13 +272,6 @@ The script intelligently handles McDonald's name variations:
 - Mac Do
 - MacDonald's
 - And various combinations with location names
-
-## Waste Type Detection
-
-Automatically detects and categorizes:
-- **DIB**: Déchets Industriels Banals
-- **BIO**: Biodegradable waste
-- **CS**: Déchets recyclables (Collecte Sélective)
 
 ## Error Handling
 

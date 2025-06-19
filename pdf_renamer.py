@@ -2,7 +2,7 @@
 """
 PDF Invoice Renamer Script
 Automatically renames PDF invoices based on their content using the format:
-Site-Collecte(+CS/BIO/DIB)-InvoiceMonthYear-InvoiceNumber
+Site-Collecte-InvoiceMonthYear-InvoiceNumber
 """
 
 import os
@@ -116,8 +116,6 @@ class ProcessingLogger:
                 logger.info(f"     Site: {extracted_data['site_number']}")
             if 'collecte' in extracted_data:
                 logger.info(f"     Collecte: {extracted_data['collecte']}")
-            if 'waste_types' in extracted_data and extracted_data['waste_types']:
-                logger.info(f"     Waste types: {', '.join(extracted_data['waste_types'])}")
             if 'invoice_number' in extracted_data:
                 logger.info(f"     Invoice #: {extracted_data['invoice_number']}")
             if 'invoice_date' in extracted_data:
@@ -725,7 +723,6 @@ class PDFRenamer:
         3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
         4. invoice_date: The invoice date in DD/MM/YYYY format
         5. invoice_number: The invoice number (usually alphanumeric)
-        6. waste_types: Array of waste types found (look for DIB, BIO, CS, DECHET RECYCLABLE, etc.)
         
         Important notes:
         - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
@@ -736,8 +733,6 @@ class PDFRenamer:
           3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
           4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
         - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
-        - Look for waste type indicators like "DIB", "BIO", "CS", "DECHET RECYCLABLE" (CS), "Déchets recyclables" (CS)
-        - CRITICAL: Only "Déchets recyclables" should be classified as CS. "Déchets NON recyclables" should NOT be classified as CS or DECHET RECYCLABLE
         - The invoice provider is usually the company issuing the invoice
         - Be very careful with the invoice number - it's usually prominently displayed
         - CRITICAL: Look for company logos in the image! Sometimes the invoice provider will not be listed explicitly via text, in this case you MUST use the logos to identify the provider (e.g., SUEZ logo, VEOLIA logo, PAPREC logo) and use that as the invoice_provider
@@ -768,7 +763,6 @@ class PDFRenamer:
                 3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
                 4. invoice_date: The invoice date in DD/MM/YYYY format
                 5. invoice_number: The invoice number (usually alphanumeric)
-                6. waste_types: Array of waste types found (look for DIB, BIO, CS, DECHET RECYCLABLE, etc.)
                 
                 Important notes:
                 - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
@@ -779,8 +773,6 @@ class PDFRenamer:
                   3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
                   4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
                 - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
-                - Look for waste type indicators like "DIB", "BIO", "CS", "DECHET RECYCLABLE" (CS), "Déchets recyclables" (CS)
-                - CRITICAL: Only "Déchets recyclables" should be classified as CS. "Déchets NON recyclables" should NOT be classified as CS or DECHET RECYCLABLE
                 - The invoice provider is usually the company issuing the invoice
                 - Be very careful with the invoice number - it's usually prominently displayed
                 
@@ -1013,61 +1005,9 @@ class PDFRenamer:
         # For non-McDonald's restaurants, check for direct name similarity
         return name1_clean == name2_clean or name1_clean in name2_clean or name2_clean in name1_clean
     
-    def _determine_collecte_suffix(self, collecte: str, waste_types: List[str]) -> str:
-        """Determine the collecte suffix based on waste types found."""
-        if not waste_types:
-            return collecte.upper()
-        
-        # Normalize waste types
-        detected_types = set()
-        for waste_type in waste_types:
-            waste_upper = waste_type.upper()
-            if 'BIO' in waste_upper:
-                detected_types.add('BIO')
-            if 'DIB' in waste_upper:
-                detected_types.add('DIB')
-            if any(cs_indicator in waste_upper for cs_indicator in ['CS', 'RECYCLABLE', 'RECYCLABLES']):
-                detected_types.add('CS')
-        
-        # If no waste types detected, return base collecte
-        if not detected_types:
-            return collecte.upper()
-        
-        # Check against valid combinations from prestataires data
-        if collecte.upper() in self.prestataires_data:
-            valid_combinations = [combo.upper() for combo in self.prestataires_data[collecte.upper()]]
-            
-            # Find the best matching combination
-            best_match = None
-            best_score = 0
-            
-            for combo in valid_combinations:
-                # Extract waste types from this combination
-                combo_types = set()
-                if 'BIO' in combo:
-                    combo_types.add('BIO')
-                if 'DIB' in combo:
-                    combo_types.add('DIB')
-                if 'CS' in combo:
-                    combo_types.add('CS')
-                
-                # Calculate match score (how many detected types are in this combination)
-                match_score = len(detected_types.intersection(combo_types))
-                
-                # Prefer exact matches, then partial matches
-                if combo_types == detected_types:
-                    return combo
-                elif match_score > best_score:
-                    best_match = combo
-                    best_score = match_score
-            
-            # Return best match if found
-            if best_match:
-                return best_match
-        
-        # Fallback: create suffix manually (this shouldn't happen with valid data)
-        sorted_types = sorted(list(detected_types))
-        return collecte.upper() + ''.join(sorted_types)
+    def _determine_collecte_suffix(self, collecte: str) -> str:
+        """Return the collecte name without waste type suffixes."""
+        return collecte.upper()
     
     def _format_date(self, date_str: str) -> str:
         """Format date from DD/MM/YYYY to MMYYYY."""
@@ -1096,7 +1036,6 @@ class PDFRenamer:
         invoice_provider = analysis.get('invoice_provider', '')
         invoice_date = analysis.get('invoice_date', '')
         invoice_number = analysis.get('invoice_number', '')
-        waste_types = analysis.get('waste_types', [])
         restaurant_address = analysis.get('restaurant_address', '')
         
         if not all([entreprise, invoice_provider, invoice_date, invoice_number]):
@@ -1123,8 +1062,8 @@ class PDFRenamer:
             logger.error(f"Could not find site number for {entreprise} with collecte {base_collecte}")
             return None
         
-        # Determine collecte suffix using the base collecte name
-        collecte_suffix = self._determine_collecte_suffix(base_collecte, waste_types)
+        # Use base collecte name as the collecte suffix
+        collecte_suffix = self._determine_collecte_suffix(base_collecte)
         
         # Format date
         formatted_date = self._format_date(invoice_date)
@@ -1162,7 +1101,6 @@ class PDFRenamer:
         invoice_provider = analysis.get('invoice_provider', '')
         invoice_date = analysis.get('invoice_date', '')
         invoice_number = analysis.get('invoice_number', '')
-        waste_types = analysis.get('waste_types', [])
         restaurant_address = analysis.get('restaurant_address', '')
         
         # Prepare detailed extraction data
@@ -1171,7 +1109,6 @@ class PDFRenamer:
             'invoice_provider': invoice_provider,
             'invoice_date': invoice_date,
             'invoice_number': invoice_number,
-            'waste_types': waste_types,
             'restaurant_address': restaurant_address,
             'raw_analysis': analysis
         }
@@ -1234,8 +1171,8 @@ class PDFRenamer:
             extracted_data['restaurant_name'] = matched_restaurant_name
             logger.info(f"Updated restaurant name from fallback matching: {matched_restaurant_name}")
         
-        # Determine collecte suffix using the base collecte name
-        collecte_suffix = self._determine_collecte_suffix(base_collecte, waste_types)
+        # Use base collecte name as the collecte suffix
+        collecte_suffix = self._determine_collecte_suffix(base_collecte)
         extracted_data['collecte'] = collecte_suffix
         
         # Format date
