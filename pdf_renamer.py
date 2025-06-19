@@ -982,31 +982,80 @@ class PDFRenamer:
             invoice_postal_code = self._extract_postal_code(restaurant_address)
             if invoice_postal_code:
                 logger.info(f"Address disambiguation failed, trying postal code matching with {invoice_postal_code}...")
-                postal_match_found = False
+                postal_code_matches = []
                 for restaurant in name_matches:
                     restaurant_postal_code = restaurant.get('CP', '')
                     logger.debug(f"  Checking {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}) with CP {restaurant_postal_code}")
                     if str(restaurant_postal_code) == invoice_postal_code:
+                        postal_code_matches.append(restaurant)
+                
+                if postal_code_matches:
+                    if len(postal_code_matches) == 1:
+                        # Single postal code match - use it
+                        restaurant = postal_code_matches[0]
                         site_number = restaurant.get('Site', restaurant.get('Code client'))
                         matched_name = restaurant.get('Nom', '')
                         if site_number:
                             logger.info(f"Postal code match found: {entreprise_name} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
                             return str(site_number), matched_name
-                        postal_match_found = True
+                    else:
+                        # Multiple postal code matches - use address to pick the best one
+                        logger.info(f"Found {len(postal_code_matches)} restaurants with postal code {invoice_postal_code}, using address to select best match...")
+                        best_match = None
+                        best_similarity = 0.0
+                        
+                        for restaurant in postal_code_matches:
+                            addr_similarity = self._calculate_address_similarity(restaurant_address, restaurant.get('Adresse', ''))
+                            logger.info(f"  Address similarity: {addr_similarity:.2f} for {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}) at {restaurant.get('Adresse', '')}")
+                            if addr_similarity > best_similarity:
+                                best_similarity = addr_similarity
+                                best_match = restaurant
+                        
+                        if best_match and best_similarity >= 0.4:  # Lower threshold for postal code matches
+                            site_number = best_match.get('Site', best_match.get('Code client'))
+                            matched_name = best_match.get('Nom', '')
+                            if site_number:
+                                logger.info(f"Best postal code + address match: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f}, CP: {invoice_postal_code})")
+                                return str(site_number), matched_name
+                        else:
+                            logger.warning(f"No good address match among postal code matches (best similarity: {best_similarity:.2f})")
                 
-                if not postal_match_found:
+                if not postal_code_matches:
                     logger.warning(f"No postal code matches found within name matches for postal code {invoice_postal_code}")
                     # Try global postal code matching as fallback
                     logger.info(f"Trying global postal code matching for postal code {invoice_postal_code}...")
                     postal_matches = self._find_postal_code_matches(invoice_postal_code, entreprise_name or "")
                     if postal_matches:
-                        # Use the best postal code match (highest name similarity)
-                        best_match = postal_matches[0]['restaurant']
-                        site_number = best_match.get('Site', best_match.get('Code client'))
-                        matched_name = best_match.get('Nom', '')
-                        if site_number:
-                            logger.info(f"Found via global postal code matching: {entreprise_name} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
-                            return str(site_number), matched_name
+                        if len(postal_matches) == 1:
+                            # Single global match
+                            best_match = postal_matches[0]['restaurant']
+                            site_number = best_match.get('Site', best_match.get('Code client'))
+                            matched_name = best_match.get('Nom', '')
+                            if site_number:
+                                logger.info(f"Found via global postal code matching: {entreprise_name} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
+                                return str(site_number), matched_name
+                        else:
+                            # Multiple global matches - use address to pick the best one
+                            logger.info(f"Found {len(postal_matches)} global postal code matches, using address to select best match...")
+                            best_match = None
+                            best_similarity = 0.0
+                            
+                            for match_info in postal_matches:
+                                restaurant = match_info['restaurant']
+                                addr_similarity = self._calculate_address_similarity(restaurant_address, restaurant.get('Adresse', ''))
+                                logger.info(f"  Address similarity: {addr_similarity:.2f} for {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}) at {restaurant.get('Adresse', '')}")
+                                if addr_similarity > best_similarity:
+                                    best_similarity = addr_similarity
+                                    best_match = restaurant
+                            
+                            if best_match and best_similarity >= 0.4:  # Lower threshold for postal code matches
+                                site_number = best_match.get('Site', best_match.get('Code client'))
+                                matched_name = best_match.get('Nom', '')
+                                if site_number:
+                                    logger.info(f"Best global postal code + address match: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f}, CP: {invoice_postal_code})")
+                                    return str(site_number), matched_name
+                            else:
+                                logger.warning(f"No good address match among global postal code matches (best similarity: {best_similarity:.2f})")
         
         # If single match or no address disambiguation possible, validate postal code before returning match
         if name_matches:
