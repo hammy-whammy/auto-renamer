@@ -964,24 +964,64 @@ class PDFRenamer:
             invoice_postal_code = self._extract_postal_code(restaurant_address)
             if invoice_postal_code:
                 logger.info(f"Address disambiguation failed, trying postal code matching with {invoice_postal_code}...")
+                postal_match_found = False
                 for restaurant in name_matches:
                     restaurant_postal_code = restaurant.get('CP', '')
+                    logger.debug(f"  Checking {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}) with CP {restaurant_postal_code}")
                     if str(restaurant_postal_code) == invoice_postal_code:
                         site_number = restaurant.get('Site', restaurant.get('Code client'))
                         matched_name = restaurant.get('Nom', '')
                         if site_number:
                             logger.info(f"Postal code match found: {entreprise_name} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
                             return str(site_number), matched_name
+                        postal_match_found = True
+                
+                if not postal_match_found:
+                    logger.warning(f"No postal code matches found within name matches for postal code {invoice_postal_code}")
+                    # Try global postal code matching as fallback
+                    logger.info(f"Trying global postal code matching for postal code {invoice_postal_code}...")
+                    postal_matches = self._find_postal_code_matches(invoice_postal_code, entreprise_name or "")
+                    if postal_matches:
+                        # Use the best postal code match (highest name similarity)
+                        best_match = postal_matches[0]['restaurant']
+                        site_number = best_match.get('Site', best_match.get('Code client'))
+                        matched_name = best_match.get('Nom', '')
+                        if site_number:
+                            logger.info(f"Found via global postal code matching: {entreprise_name} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
+                            return str(site_number), matched_name
         
-        # If single match or no address disambiguation possible, return first match
+        # If single match or no address disambiguation possible, validate postal code before returning match
         if name_matches:
-            # Sort by name length (prefer shorter, more generic names)
-            name_matches.sort(key=lambda x: len(x.get('Nom', '')))
-            first_match = name_matches[0]
-            site_number = first_match.get('Site', first_match.get('Code client'))
-            matched_name = first_match.get('Nom', '')
-            if site_number:
-                return str(site_number), matched_name
+            logger.info(f"Checking {len(name_matches)} name match candidates for postal code validation:")
+            for i, restaurant in enumerate(name_matches[:3]):  # Show first 3
+                logger.info(f"  {i+1}. {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}, CP {restaurant.get('CP', '')})")
+            
+            # If we have a postal code from the invoice, validate against it
+            invoice_postal_code = self._extract_postal_code(restaurant_address) if restaurant_address else None
+            if invoice_postal_code:
+                logger.info(f"Validating name matches against invoice postal code {invoice_postal_code}...")
+                for restaurant in name_matches:
+                    restaurant_postal_code = restaurant.get('CP', '')
+                    if str(restaurant_postal_code) == invoice_postal_code:
+                        site_number = restaurant.get('Site', restaurant.get('Code client'))
+                        matched_name = restaurant.get('Nom', '')
+                        if site_number:
+                            logger.info(f"Found validated match: {entreprise_name} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
+                            return str(site_number), matched_name
+                
+                logger.warning(f"No name matches have postal code {invoice_postal_code} - cannot safely assign site number")
+                return None, None
+            else:
+                # No postal code available - use first match as fallback (risky but legacy behavior)
+                logger.warning(f"No postal code available for validation - using first name match as fallback")
+                # Sort by name length (prefer shorter, more generic names)
+                name_matches.sort(key=lambda x: len(x.get('Nom', '')))
+                first_match = name_matches[0]
+                site_number = first_match.get('Site', first_match.get('Code client'))
+                matched_name = first_match.get('Nom', '')
+                if site_number:
+                    logger.warning(f"Using unvalidated fallback match: {entreprise_name} -> {matched_name} (Site {site_number})")
+                    return str(site_number), matched_name
         
         return None, None
     
