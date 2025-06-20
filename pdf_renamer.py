@@ -1116,6 +1116,12 @@ class PDFRenamer:
         """Return the collecte name without waste type suffixes."""
         return collecte.upper()
     
+    def _sanitize_invoice_number(self, invoice_number: str) -> str:
+        """Sanitize invoice number by removing spaces and dashes."""
+        if not invoice_number:
+            return invoice_number
+        return invoice_number.replace(' ', '').replace('-', '')
+    
     def _format_date(self, date_str: str) -> str:
         """Format date from DD/MM/YYYY to MMYYYY."""
         try:
@@ -1176,7 +1182,7 @@ class PDFRenamer:
         formatted_date = self._format_date(invoice_date)
         
         # Generate filename
-        new_filename = f"{site_number}-{collecte_suffix}-{formatted_date}-{invoice_number}.pdf"
+        new_filename = f"{site_number}-{collecte_suffix}-{formatted_date}-{self._sanitize_invoice_number(invoice_number)}.pdf"
         
         logger.info(f"Generated filename: {new_filename}")
         return new_filename
@@ -1283,7 +1289,7 @@ class PDFRenamer:
         extracted_data['formatted_date'] = formatted_date
         
         # Generate filename
-        new_filename = f"{site_number}-{collecte_suffix}-{formatted_date}-{invoice_number}.pdf"
+        new_filename = f"{site_number}-{collecte_suffix}-{formatted_date}-{self._sanitize_invoice_number(invoice_number)}.pdf"
         extracted_data['generated_filename'] = new_filename
         
         return new_filename, extracted_data
