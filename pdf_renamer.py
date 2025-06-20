@@ -961,7 +961,17 @@ class PDFRenamer:
                 if invoice_postal_code and restaurant_postal_code:
                     if str(restaurant_postal_code) != invoice_postal_code:
                         logger.warning(f"Address match found but postal codes don't match: invoice {invoice_postal_code} vs restaurant {restaurant_postal_code}")
-                        logger.info(f"Rejecting address match due to postal code mismatch: {best_match.get('Nom', '')} (Site {best_match.get('Site', '')}, similarity: {best_similarity:.2f})")
+                        
+                        # Allow very strong address matches (>0.8) to override postal code mismatches
+                        if best_similarity > 0.8:
+                            logger.info(f"⚠️  OVERRIDE: Accepting high-confidence address match despite postal code mismatch: {best_match.get('Nom', '')} (Site {best_match.get('Site', '')}, similarity: {best_similarity:.2f})")
+                            site_number = best_match.get('Site', best_match.get('Code client'))
+                            matched_name = best_match.get('Nom', '')
+                            if site_number:
+                                logger.info(f"Address disambiguation successful with postal code override: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f}, invoice CP: {invoice_postal_code}, restaurant CP: {restaurant_postal_code})")
+                                return str(site_number), matched_name
+                        else:
+                            logger.info(f"Rejecting address match due to postal code mismatch: {best_match.get('Nom', '')} (Site {best_match.get('Site', '')}, similarity: {best_similarity:.2f})")
                     else:
                         site_number = best_match.get('Site', best_match.get('Code client'))
                         matched_name = best_match.get('Nom', '')
