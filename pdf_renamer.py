@@ -1155,8 +1155,8 @@ class PDFRenamer:
         return name1_clean == name2_clean or name1_clean in name2_clean or name2_clean in name1_clean
     
     def _determine_collecte_suffix(self, collecte: str) -> str:
-        """Return the collecte name without waste type suffixes."""
-        return collecte.upper()
+        """Return the collecte name without waste type suffixes and spaces removed."""
+        return collecte.upper().replace(' ', '')
     
     def _sanitize_invoice_number(self, invoice_number: str) -> str:
         """Sanitize invoice number by removing spaces and dashes."""
