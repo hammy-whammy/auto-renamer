@@ -601,6 +601,36 @@ class PDFRenamer:
         # Use sequence matcher for similarity
         return SequenceMatcher(None, norm_addr1, norm_addr2).ratio()
     
+    def _calculate_address_similarity_with_site_detection(self, invoice_address: str, restaurant_address: str, restaurant_site: str) -> float:
+        """Enhanced address similarity that detects site numbers in addresses."""
+        # First check if the invoice address contains the site number anywhere
+        if invoice_address and restaurant_site:
+            # Clean the address and check for site number patterns
+            cleaned_address = invoice_address.strip().lower()
+            site_num = restaurant_site.strip()
+            
+            # Check various patterns where site number might appear
+            site_patterns = [
+                f"{site_num} ",      # "353 CHARTRES"
+                f"{site_num}-",      # "353-CHARTRES"  
+                f"{site_num}_",      # "353_CHARTRES"
+                f" {site_num} ",     # " 353 "
+                f"/{site_num}/",     # "/353/"
+                f"code {site_num}",  # "code 353"
+                f"site {site_num}",  # "site 353"
+                f"mc do {site_num}", # "mc do 353"
+                f"do {site_num} ",   # "do 353 chartres"
+                f"o {site_num} ",    # "o 353 chartres" (in case of OCR issues)
+            ]
+            
+            for pattern in site_patterns:
+                if pattern.lower() in cleaned_address:
+                    logger.info(f"🎯 SITE NUMBER DETECTED: Address '{invoice_address}' contains site number {restaurant_site} (pattern: '{pattern.strip()}')")
+                    return 1.0  # Perfect match when site number is detected
+        
+        # Fall back to regular address similarity
+        return self._calculate_address_similarity(invoice_address, restaurant_address)
+    
     def _calculate_name_similarity(self, name1: str, name2: str) -> float:
         """Calculate similarity between two restaurant names."""
         if not name1 or not name2:
@@ -645,6 +675,23 @@ class PDFRenamer:
                             'address_similarity': addr_similarity,
                             'match_type': 'address_fallback'
                         })
+        
+        # If still no matches, do global address search across ALL restaurants
+        if not matches:
+            logger.info(f"No name-based matches found, searching globally by address: '{address}'")
+            for restaurant in self.restaurants_data:
+                addr_similarity = self._calculate_address_similarity_with_site_detection(
+                    address, 
+                    restaurant.get('Adresse', ''), 
+                    restaurant.get('Site', '')
+                )
+                if addr_similarity >= 0.5:  # Lower threshold for global address search
+                    matches.append({
+                        'restaurant': restaurant,
+                        'address_similarity': addr_similarity,
+                        'match_type': 'global_address'
+                    })
+                    logger.info(f"  Global address match: {addr_similarity:.2f} for {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}) at {restaurant.get('Adresse', '')}")
         
         # Sort by address similarity (best matches first)
         matches.sort(key=lambda x: x['address_similarity'], reverse=True)
@@ -731,19 +778,21 @@ class PDFRenamer:
         Analyze this French invoice PDF and extract the following information in JSON format:
         
         1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
-        2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
+        2. restaurant_address: The restaurant address including ANY site numbers or identifiers (see CRITICAL note below)
         3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
         4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
         5. invoice_number: The invoice number (usually alphanumeric)
         
         Important notes:
         - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
-        - Extract the restaurant address if visible - this helps identify the specific location
+        - CRITICAL FOR RESTAURANT ADDRESS: Look for patterns like "MC DO 353 CHARTRES" or "CLIENT COLLECTÉ 2160122 - MC DO 353 CHARTRES". If you see a number between MC DO and the city name (like "353"), this is the SITE NUMBER and is crucial for identification. Include this in the restaurant_address as "Site 353, 28000 CHARTRES" or "353 CHARTRES" format.
+        - Also look for specific street addresses like "4 place des Epars" or "Centre Commercial Carrefour" - these are important location identifiers
         - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
           1. Look for a SECONDARY address elsewhere in the invoice that represents the actual restaurant location
-          2. Use that secondary address as the restaurant_address
-          3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
-          4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
+          2. Look for patterns like "CLIENT COLLECTÉ" followed by restaurant details
+          3. Use that secondary address as the restaurant_address, including any site numbers
+          4. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "MC DO 353 CHARTRES", this should be "McDonald's Chartres")
+          5. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
         - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
         - The invoice provider is usually the company issuing the invoice
         - Be very careful with the invoice number - it's usually prominently displayed
@@ -772,22 +821,22 @@ class PDFRenamer:
                 Analyze this French invoice text and extract the following information in JSON format:
                 
                 1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
-                2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
+                2. restaurant_address: The restaurant address including ANY site numbers or identifiers (see CRITICAL note below)
                 3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
-                4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
+                4. invoice_date: The relevant date in DD/MM/YYYY format (see critical note below)
                 5. invoice_number: The invoice number (usually alphanumeric)
                 
                 Important notes:
                 - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
-                - Extract the restaurant address if visible - this helps identify the specific location
+                - CRITICAL FOR RESTAURANT ADDRESS: Look for patterns like "MC DO 353 CHARTRES" or "CLIENT COLLECTÉ 2160122 - MC DO 353 CHARTRES". If you see a number between MC DO and the city name (like "353"), this is the SITE NUMBER and is crucial for identification. Include this in the restaurant_address as "Site 353, 28000 CHARTRES" or "353 CHARTRES" format.
+                - Also look for specific street addresses like "4 place des Epars" or "Centre Commercial Carrefour" - these are important location identifiers
                 - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
                   1. Look for a SECONDARY address elsewhere in the invoice that represents the actual restaurant location
-                  2. Use that secondary address as the restaurant_address
-                  3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
-                  4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
+                  2. Look for patterns like "CLIENT COLLECTÉ" followed by restaurant details
+                  3. Use that secondary address as the restaurant_address, including any site numbers
+                  4. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "MC DO 353 CHARTRES", this should be "McDonald's Chartres")
+                  5. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
                 - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
-                - The invoice provider is usually the company issuing the invoice
-                - Be very careful with the invoice number - it's usually prominently displayed
                 - CRITICAL FOR DATE: Look for "Période" field first, which shows a date range (e.g., "01/05/2025 - 31/05/2025"). If this exists, use the START date of the range as the invoice_date. Only if no "Période" field exists, then use the regular invoice date. The "Période" represents the service period and is more important for our filing system than the actual invoice creation date.
                 
                 Invoice text:
@@ -1024,7 +1073,7 @@ class PDFRenamer:
                         
                         for match_info in postal_matches:
                             restaurant = match_info['restaurant']
-                            addr_similarity = self._calculate_address_similarity(restaurant_address, restaurant.get('Adresse', ''))
+                            addr_similarity = self._calculate_address_similarity_with_site_detection(restaurant_address, restaurant.get('Adresse', ''), restaurant.get('Site', ''))
                             logger.info(f"  Address similarity: {addr_similarity:.2f} for {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}) at {restaurant.get('Adresse', '')}")
                             if addr_similarity > best_similarity:
                                 best_similarity = addr_similarity
@@ -1076,8 +1125,6 @@ class PDFRenamer:
                             if similarity > best_similarity:
                                 best_similarity = similarity
                                 best_match = restaurant
-                        
-                        logger.info(f"Best name match within postal code matches: {best_match.get('Nom', '')} (similarity: {best_similarity:.2f})")
                     
                     site_number = best_match.get('Site', best_match.get('Code client'))
                     matched_name = best_match.get('Nom', '')
