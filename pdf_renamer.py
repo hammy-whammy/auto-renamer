@@ -733,7 +733,7 @@ class PDFRenamer:
         1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
         2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
         3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
-        4. invoice_date: The invoice date in DD/MM/YYYY format
+        4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
         5. invoice_number: The invoice number (usually alphanumeric)
         
         Important notes:
@@ -749,6 +749,7 @@ class PDFRenamer:
         - Be very careful with the invoice number - it's usually prominently displayed
         - CRITICAL: Look for company logos in the image! Sometimes the invoice provider will not be listed explicitly via text, in this case you MUST use the logos to identify the provider (e.g., SUEZ logo, VEOLIA logo, PAPREC logo) and use that as the invoice_provider
         - Give priority to logos over text when determining the invoice provider - if you see a PAPREC logo but text mentions "RUBO", the correct provider is PAPREC
+        - CRITICAL FOR DATE: Look for "Période" field first, which shows a date range (e.g., "01/05/2025 - 31/05/2025"). If this exists, use the START date of the range as the invoice_date. Only if no "Période" field exists, then use the regular invoice date. The "Période" represents the service period and is more important for our filing system than the actual invoice creation date.
         
         Return only valid JSON:
         """
@@ -773,7 +774,7 @@ class PDFRenamer:
                 1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
                 2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
                 3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
-                4. invoice_date: The invoice date in DD/MM/YYYY format
+                4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
                 5. invoice_number: The invoice number (usually alphanumeric)
                 
                 Important notes:
@@ -787,6 +788,7 @@ class PDFRenamer:
                 - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
                 - The invoice provider is usually the company issuing the invoice
                 - Be very careful with the invoice number - it's usually prominently displayed
+                - CRITICAL FOR DATE: Look for "Période" field first, which shows a date range (e.g., "01/05/2025 - 31/05/2025"). If this exists, use the START date of the range as the invoice_date. Only if no "Période" field exists, then use the regular invoice date. The "Période" represents the service period and is more important for our filing system than the actual invoice creation date.
                 
                 Invoice text:
                 {pdf_text}
