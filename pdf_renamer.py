@@ -445,7 +445,7 @@ class PDFRenamer:
             raise ValueError("Please set your Gemini API key in the .env file or pass it as a parameter")
         
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
+        self.model = genai.GenerativeModel('gemini-2.5-flash')
         self.csv_dir = Path(csv_dir)
         
         # Initialize enhanced logging
@@ -602,33 +602,9 @@ class PDFRenamer:
         return SequenceMatcher(None, norm_addr1, norm_addr2).ratio()
     
     def _calculate_address_similarity_with_site_detection(self, invoice_address: str, restaurant_address: str, restaurant_site: str) -> float:
-        """Enhanced address similarity that detects site numbers in addresses."""
-        # First check if the invoice address contains the site number anywhere
-        if invoice_address and restaurant_site:
-            # Clean the address and check for site number patterns
-            cleaned_address = invoice_address.strip().lower()
-            site_num = restaurant_site.strip()
-            
-            # Check various patterns where site number might appear
-            site_patterns = [
-                f"{site_num} ",      # "353 CHARTRES"
-                f"{site_num}-",      # "353-CHARTRES"  
-                f"{site_num}_",      # "353_CHARTRES"
-                f" {site_num} ",     # " 353 "
-                f"/{site_num}/",     # "/353/"
-                f"code {site_num}",  # "code 353"
-                f"site {site_num}",  # "site 353"
-                f"mc do {site_num}", # "mc do 353"
-                f"do {site_num} ",   # "do 353 chartres"
-                f"o {site_num} ",    # "o 353 chartres" (in case of OCR issues)
-            ]
-            
-            for pattern in site_patterns:
-                if pattern.lower() in cleaned_address:
-                    logger.info(f"🎯 SITE NUMBER DETECTED: Address '{invoice_address}' contains site number {restaurant_site} (pattern: '{pattern.strip()}')")
-                    return 1.0  # Perfect match when site number is detected
-        
-        # Fall back to regular address similarity
+        """Calculate address similarity without site number detection (disabled due to false positives)."""
+        # Site number detection disabled - it was causing too many false positives
+        # e.g., matching "50" from postal code "72650" as site number 50
         return self._calculate_address_similarity(invoice_address, restaurant_address)
     
     def _calculate_name_similarity(self, name1: str, name2: str) -> float:
@@ -785,14 +761,18 @@ class PDFRenamer:
         
         Important notes:
         - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
-        - CRITICAL FOR RESTAURANT ADDRESS: Look for patterns like "MC DO 353 CHARTRES" or "CLIENT COLLECTÉ 2160122 - MC DO 353 CHARTRES". If you see a number between MC DO and the city name (like "353"), this is the SITE NUMBER and is crucial for identification. Include this in the restaurant_address as "Site 353, 28000 CHARTRES" or "353 CHARTRES" format.
-        - Also look for specific street addresses like "4 place des Epars" or "Centre Commercial Carrefour" - these are important location identifiers
+        - CRITICAL FOR RESTAURANT IDENTIFICATION: Look for these specific patterns to identify the McDonald's restaurant:
+          * Pattern 1: "MC DO 353 CHARTRES" or "CLIENT COLLECTÉ 2160122 - MC DO 353 CHARTRES" where 353 is the site number
+          * Pattern 2: Lines like "865 LE MANS CGR" or "299 LE MANS NORD" where the number at the start is the site number and the text after is the location name
+          * Pattern 3: "Site n° XXXXX" followed by a line with the restaurant details
+          * When you find these patterns, construct the entreprise as "McDonald's [Location]" (e.g., "McDonald's Le Mans Cgr" for "865 LE MANS CGR")
+          * Include the site number in the restaurant_address as "Site 865, Le Mans Cgr" or "865 LE MANS CGR"
         - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
           1. Look for a SECONDARY address elsewhere in the invoice that represents the actual restaurant location
           2. Look for patterns like "CLIENT COLLECTÉ" followed by restaurant details
-          3. Use that secondary address as the restaurant_address, including any site numbers
-          4. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "MC DO 353 CHARTRES", this should be "McDonald's Chartres")
-          5. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
+          3. Look for lines like "865 LE MANS CGR" or "MC DONALDS - ZAC LES PORTES DE L' OCEANE" which indicate the actual restaurant
+          4. Use that secondary address as the restaurant_address, including any site numbers found (like "865")
+          5. For the entreprise field, derive the restaurant name from the site line (e.g., "865 LE MANS CGR" becomes "McDonald's Le Mans Cgr")
         - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
         - The invoice provider is usually the company issuing the invoice
         - Be very careful with the invoice number - it's usually prominently displayed
@@ -828,14 +808,18 @@ class PDFRenamer:
                 
                 Important notes:
                 - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
-                - CRITICAL FOR RESTAURANT ADDRESS: Look for patterns like "MC DO 353 CHARTRES" or "CLIENT COLLECTÉ 2160122 - MC DO 353 CHARTRES". If you see a number between MC DO and the city name (like "353"), this is the SITE NUMBER and is crucial for identification. Include this in the restaurant_address as "Site 353, 28000 CHARTRES" or "353 CHARTRES" format.
-                - Also look for specific street addresses like "4 place des Epars" or "Centre Commercial Carrefour" - these are important location identifiers
+                - CRITICAL FOR RESTAURANT IDENTIFICATION: Look for these specific patterns to identify the McDonald's restaurant:
+                  * Pattern 1: "MC DO 353 CHARTRES" or "CLIENT COLLECTÉ 2160122 - MC DO 353 CHARTRES" where 353 is the site number
+                  * Pattern 2: Lines like "865 LE MANS CGR" or "299 LE MANS NORD" where the number at the start is the site number and the text after is the location name
+                  * Pattern 3: "Site n° XXXXX" followed by a line with the restaurant details
+                  * When you find these patterns, construct the entreprise as "McDonald's [Location]" (e.g., "McDonald's Le Mans Cgr" for "865 LE MANS CGR")
+                  * Include the site number in the restaurant_address as "Site 865, Le Mans Cgr" or "865 LE MANS CGR"
                 - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
                   1. Look for a SECONDARY address elsewhere in the invoice that represents the actual restaurant location
                   2. Look for patterns like "CLIENT COLLECTÉ" followed by restaurant details
-                  3. Use that secondary address as the restaurant_address, including any site numbers
-                  4. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "MC DO 353 CHARTRES", this should be "McDonald's Chartres")
-                  5. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
+                  3. Look for lines like "865 LE MANS CGR" or "MC DONALDS - ZAC LES PORTES DE L' OCEANE" which indicate the actual restaurant
+                  4. Use that secondary address as the restaurant_address, including any site numbers found (like "865")
+                  5. For the entreprise field, derive the restaurant name from the site line (e.g., "865 LE MANS CGR" becomes "McDonald's Le Mans Cgr")
                 - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
                 - CRITICAL FOR DATE: Look for "Période" field first, which shows a date range (e.g., "01/05/2025 - 31/05/2025"). If this exists, use the START date of the range as the invoice_date. Only if no "Période" field exists, then use the regular invoice date. The "Période" represents the service period and is more important for our filing system than the actual invoice creation date.
                 
