@@ -20,6 +20,7 @@ import argparse
 from dotenv import load_dotenv
 import pandas as pd
 from difflib import SequenceMatcher
+from fuzzywuzzy import fuzz, process
 
 # Load environment variables
 load_dotenv()
@@ -1183,6 +1184,10 @@ class PDFRenamer:
         name1_clean = re.sub(r'[^\w\s]', '', name1.lower())
         name2_clean = re.sub(r'[^\w\s]', '', name2.lower())
         
+        # First try exact/substring matching
+        if name1_clean == name2_clean or name1_clean in name2_clean or name2_clean in name1_clean:
+            return True
+        
         # For McDonald's, check if location matches
         if any(variant in name1_clean for variant in ['mcdonald', 'mac do']):
             if any(variant in name2_clean for variant in ['mcdonald', 'mac do']):
@@ -1191,11 +1196,44 @@ class PDFRenamer:
                 location2 = re.sub(r'(mcdonald[s]?|mac\s*do)', '', name2_clean).strip()
                 
                 # Check if locations match or are similar
-                return location1 in location2 or location2 in location1 or \
-                       any(word in location2.split() for word in location1.split() if len(word) > 2)
+                if location1 in location2 or location2 in location1:
+                    return True
+                    
+                # Use fuzzy matching for locations (handling typos like "chateaudon" vs "chateaudun")
+                location_similarity = fuzz.ratio(location1, location2)
+                if location_similarity >= 85:  # 85% similarity threshold for locations
+                    logger.info(f"Fuzzy matched McDonald's locations: '{location1}' vs '{location2}' (score: {location_similarity})")
+                    return True
+                    
+                # Check individual words in locations
+                location1_words = [w for w in location1.split() if len(w) > 2]
+                location2_words = [w for w in location2.split() if len(w) > 2]
+                
+                for word1 in location1_words:
+                    for word2 in location2_words:
+                        word_similarity = fuzz.ratio(word1, word2)
+                        if word_similarity >= 90:  # Higher threshold for individual words
+                            logger.debug(f"Fuzzy matched McDonald's location words: '{word1}' vs '{word2}' (score: {word_similarity})")
+                            return True
         
-        # For non-McDonald's restaurants, check for direct name similarity
-        return name1_clean == name2_clean or name1_clean in name2_clean or name2_clean in name1_clean
+        # For non-McDonald's restaurants, use fuzzy matching
+        overall_similarity = fuzz.ratio(name1_clean, name2_clean)
+        if overall_similarity >= 85:  # 85% similarity threshold
+            logger.info(f"Fuzzy matched restaurant names: '{name1_clean}' vs '{name2_clean}' (score: {overall_similarity})")
+            return True
+        
+        # Check individual words for partial matches
+        name1_words = [w for w in name1_clean.split() if len(w) > 3]
+        name2_words = [w for w in name2_clean.split() if len(w) > 3]
+        
+        for word1 in name1_words:
+            for word2 in name2_words:
+                word_similarity = fuzz.ratio(word1, word2)
+                if word_similarity >= 90:  # Higher threshold for individual words
+                    logger.debug(f"Fuzzy matched restaurant name words: '{word1}' vs '{word2}' (score: {word_similarity})")
+                    return True
+        
+        return False
     
     def _determine_collecte_suffix(self, collecte: str) -> str:
         """Return the collecte name without waste type suffixes and spaces removed."""
@@ -1470,18 +1508,38 @@ class PDFRenamer:
             
         provider_upper = provider_name.upper()
         
-        # Check if any collecte name is contained in the provider name
+        # First, try exact matching (as before)
         for collecte in self.prestataires_data.keys():
             collecte_upper = collecte.upper()
             if collecte_upper in provider_upper:
-                logger.info(f"Found base collecte '{collecte}' in provider '{provider_name}'")
+                logger.info(f"Found base collecte '{collecte}' in provider '{provider_name}' (exact match)")
                 return collecte
         
-        # If no direct match, try partial matching for common variations
+        # If no exact match, use fuzzy matching
+        collecte_names = list(self.prestataires_data.keys())
+        
+        # Try fuzzy matching on the full provider name first
+        best_match = process.extractOne(provider_upper, [c.upper() for c in collecte_names], scorer=fuzz.partial_ratio)
+        if best_match and best_match[1] >= 85:  # 85% similarity threshold
+            matched_collecte = collecte_names[[c.upper() for c in collecte_names].index(best_match[0])]
+            logger.info(f"Found base collecte '{matched_collecte}' via fuzzy matching (full name, score: {best_match[1]})")
+            return matched_collecte
+        
+        # Try fuzzy matching on individual words in the provider name
+        provider_words = provider_upper.split()
+        for word in provider_words:
+            if len(word) >= 4:  # Only consider words with 4+ characters
+                best_word_match = process.extractOne(word, [c.upper() for c in collecte_names], scorer=fuzz.ratio)
+                if best_word_match and best_word_match[1] >= 90:  # Higher threshold for individual words
+                    matched_collecte = collecte_names[[c.upper() for c in collecte_names].index(best_word_match[0])]
+                    logger.info(f"Found base collecte '{matched_collecte}' via fuzzy word matching (word: '{word}', score: {best_word_match[1]})")
+                    return matched_collecte
+        
+        # Fallback to manual mappings for common variations
         common_mappings = {
             'SUEZ': ['SUEZ'],
             'VEOLIA': ['VEOLIA'],
-            'REFOOD': ['REFOOD'],
+            'REFOOD': ['REFOOD', 'REFOUD'],  # Handle OCR error
             'PAPREC': ['PAPREC'],
             'ELISE': ['ELISE'],
             'DERICHEBOURG': ['DERICHEBOURG'],
@@ -1494,10 +1552,10 @@ class PDFRenamer:
         for base_name, variations in common_mappings.items():
             for variation in variations:
                 if variation in provider_upper:
-                    logger.info(f"Found base collecte '{base_name}' via mapping from provider '{provider_name}'")
+                    logger.info(f"Found base collecte '{base_name}' via manual mapping from provider '{provider_name}'")
                     return base_name
         
-        logger.warning(f"Could not find base collecte name for provider '{provider_name}'")
+        logger.warning(f"Could not find base collecte name for provider '{provider_name}' even with fuzzy matching")
         return None
 
 
