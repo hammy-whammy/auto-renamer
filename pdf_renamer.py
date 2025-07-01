@@ -1219,6 +1219,17 @@ class PDFRenamer:
                 location1 = re.sub(r'(mcdonald[s]?|mac\s*do)', '', name1_clean).strip()
                 location2 = re.sub(r'(mcdonald[s]?|mac\s*do)', '', name2_clean).strip()
                 
+                # Skip matching if location is too generic or contains only site numbers
+                generic_patterns = [r'^site\s*\d+$', r'^site$', r'^\d+$']
+                for pattern in generic_patterns:
+                    if re.match(pattern, location1) or re.match(pattern, location2):
+                        logger.debug(f"Skipping generic location match: '{location1}' vs '{location2}'")
+                        return False
+                
+                # Require meaningful location names (at least 3 chars, not just numbers)
+                if len(location1) < 3 or len(location2) < 3:
+                    return False
+                
                 # Check if locations match or are similar
                 if location1 in location2 or location2 in location1:
                     return True
