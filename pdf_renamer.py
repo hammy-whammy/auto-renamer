@@ -1170,16 +1170,26 @@ class PDFRenamer:
                 logger.warning(f"No validated matches found for postal code {invoice_postal_code} - cannot safely assign site number")
                 return None, None
             else:
-                # No postal code available - use first match as fallback (risky but legacy behavior)
-                logger.warning(f"No postal code available for validation - using first name match as fallback")
-                # Sort by name length (prefer shorter, more generic names)
-                name_matches.sort(key=lambda x: len(x.get('Nom', '')))
-                first_match = name_matches[0]
-                site_number = first_match.get('Site', first_match.get('Code client'))
-                matched_name = first_match.get('Nom', '')
-                if site_number:
-                    logger.warning(f"Using unvalidated fallback match: {entreprise_name} -> {matched_name} (Site {site_number})")
-                    return str(site_number), matched_name
+                # No postal code available - use best name similarity match as fallback
+                logger.warning(f"No postal code available for validation - using best name similarity match as fallback")
+                
+                # Calculate name similarity for all matches and pick the best one
+                best_match = None
+                best_similarity = 0.0
+                
+                for restaurant in name_matches:
+                    restaurant_name = restaurant.get('Nom', '').lower()
+                    similarity = self._calculate_name_similarity(normalized_name, restaurant_name)
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        best_match = restaurant
+                
+                if best_match:
+                    site_number = best_match.get('Site', best_match.get('Code client'))
+                    matched_name = best_match.get('Nom', '')
+                    if site_number:
+                        logger.warning(f"Using best similarity fallback match: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.3f})")
+                        return str(site_number), matched_name
         
         return None, None
     
