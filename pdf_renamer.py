@@ -1169,10 +1169,10 @@ class PDFRenamer:
         return collecte.upper().replace(' ', '')
     
     def _sanitize_invoice_number(self, invoice_number: str) -> str:
-        """Sanitize invoice number by removing spaces and dashes."""
+        """Sanitize invoice number by removing spaces, dashes, and slashes."""
         if not invoice_number:
             return invoice_number
-        return invoice_number.replace(' ', '').replace('-', '')
+        return invoice_number.replace(' ', '').replace('-', '').replace('/', '').replace('\\', '')
     
     def _format_date(self, date_str: str) -> str:
         """Format date from DD/MM/YYYY to MMYYYY."""
