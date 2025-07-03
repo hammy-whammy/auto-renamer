@@ -20,7 +20,6 @@ import argparse
 from dotenv import load_dotenv
 import pandas as pd
 from difflib import SequenceMatcher
-from fuzzywuzzy import fuzz, process
 
 # Load environment variables
 load_dotenv()
@@ -446,7 +445,7 @@ class PDFRenamer:
             raise ValueError("Please set your Gemini API key in the .env file or pass it as a parameter")
         
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
         self.csv_dir = Path(csv_dir)
         
         # Initialize enhanced logging
@@ -602,12 +601,6 @@ class PDFRenamer:
         # Use sequence matcher for similarity
         return SequenceMatcher(None, norm_addr1, norm_addr2).ratio()
     
-    def _calculate_address_similarity_with_site_detection(self, invoice_address: str, restaurant_address: str, restaurant_site: str) -> float:
-        """Calculate address similarity without site number detection (disabled due to false positives)."""
-        # Site number detection disabled - it was causing too many false positives
-        # e.g., matching "50" from postal code "72650" as site number 50
-        return self._calculate_address_similarity(invoice_address, restaurant_address)
-    
     def _calculate_name_similarity(self, name1: str, name2: str) -> float:
         """Calculate similarity between two restaurant names."""
         if not name1 or not name2:
@@ -652,23 +645,6 @@ class PDFRenamer:
                             'address_similarity': addr_similarity,
                             'match_type': 'address_fallback'
                         })
-        
-        # If still no matches, do global address search across ALL restaurants
-        if not matches:
-            logger.info(f"No name-based matches found, searching globally by address: '{address}'")
-            for restaurant in self.restaurants_data:
-                addr_similarity = self._calculate_address_similarity_with_site_detection(
-                    address, 
-                    restaurant.get('Adresse', ''), 
-                    restaurant.get('Site', '')
-                )
-                if addr_similarity >= 0.5:  # Lower threshold for global address search
-                    matches.append({
-                        'restaurant': restaurant,
-                        'address_similarity': addr_similarity,
-                        'match_type': 'global_address'
-                    })
-                    logger.info(f"  Global address match: {addr_similarity:.2f} for {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}) at {restaurant.get('Adresse', '')}")
         
         # Sort by address similarity (best matches first)
         matches.sort(key=lambda x: x['address_similarity'], reverse=True)
@@ -755,25 +731,19 @@ class PDFRenamer:
         Analyze this French invoice PDF and extract the following information in JSON format:
         
         1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
-        2. restaurant_address: The restaurant address including ANY site numbers or identifiers (see CRITICAL note below)
+        2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
         3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
         4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
         5. invoice_number: The invoice number (usually alphanumeric)
         
         Important notes:
         - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
-        - CRITICAL FOR RESTAURANT IDENTIFICATION: Look for these specific patterns to identify the McDonald's restaurant:
-          * Pattern 1: "MC DO 353 CHARTRES" or "CLIENT COLLECTÉ 2160122 - MC DO 353 CHARTRES" where 353 is the site number
-          * Pattern 2: Lines like "865 LE MANS CGR" or "299 LE MANS NORD" where the number at the start is the site number and the text after is the location name
-          * Pattern 3: "Site n° XXXXX" followed by a line with the restaurant details
-          * When you find these patterns, construct the entreprise as "McDonald's [Location]" (e.g., "McDonald's Le Mans Cgr" for "865 LE MANS CGR")
-          * Include the site number in the restaurant_address as "Site 865, Le Mans Cgr" or "865 LE MANS CGR"
+        - Extract the restaurant address if visible - this helps identify the specific location
         - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
           1. Look for a SECONDARY address elsewhere in the invoice that represents the actual restaurant location
-          2. Look for patterns like "CLIENT COLLECTÉ" followed by restaurant details
-          3. Look for lines like "865 LE MANS CGR" or "MC DONALDS - ZAC LES PORTES DE L' OCEANE" which indicate the actual restaurant
-          4. Use that secondary address as the restaurant_address, including any site numbers found (like "865")
-          5. For the entreprise field, derive the restaurant name from the site line (e.g., "865 LE MANS CGR" becomes "McDonald's Le Mans Cgr")
+          2. Use that secondary address as the restaurant_address
+          3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
+          4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
         - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
         - The invoice provider is usually the company issuing the invoice
         - Be very careful with the invoice number - it's usually prominently displayed
@@ -802,26 +772,22 @@ class PDFRenamer:
                 Analyze this French invoice text and extract the following information in JSON format:
                 
                 1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
-                2. restaurant_address: The restaurant address including ANY site numbers or identifiers (see CRITICAL note below)
+                2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
                 3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
-                4. invoice_date: The relevant date in DD/MM/YYYY format (see critical note below)
+                4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
                 5. invoice_number: The invoice number (usually alphanumeric)
                 
                 Important notes:
                 - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
-                - CRITICAL FOR RESTAURANT IDENTIFICATION: Look for these specific patterns to identify the McDonald's restaurant:
-                  * Pattern 1: "MC DO 353 CHARTRES" or "CLIENT COLLECTÉ 2160122 - MC DO 353 CHARTRES" where 353 is the site number
-                  * Pattern 2: Lines like "865 LE MANS CGR" or "299 LE MANS NORD" where the number at the start is the site number and the text after is the location name
-                  * Pattern 3: "Site n° XXXXX" followed by a line with the restaurant details
-                  * When you find these patterns, construct the entreprise as "McDonald's [Location]" (e.g., "McDonald's Le Mans Cgr" for "865 LE MANS CGR")
-                  * Include the site number in the restaurant_address as "Site 865, Le Mans Cgr" or "865 LE MANS CGR"
+                - Extract the restaurant address if visible - this helps identify the specific location
                 - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
                   1. Look for a SECONDARY address elsewhere in the invoice that represents the actual restaurant location
-                  2. Look for patterns like "CLIENT COLLECTÉ" followed by restaurant details
-                  3. Look for lines like "865 LE MANS CGR" or "MC DONALDS - ZAC LES PORTES DE L' OCEANE" which indicate the actual restaurant
-                  4. Use that secondary address as the restaurant_address, including any site numbers found (like "865")
-                  5. For the entreprise field, derive the restaurant name from the site line (e.g., "865 LE MANS CGR" becomes "McDonald's Le Mans Cgr")
+                  2. Use that secondary address as the restaurant_address
+                  3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
+                  4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
                 - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
+                - The invoice provider is usually the company issuing the invoice
+                - Be very careful with the invoice number - it's usually prominently displayed
                 - CRITICAL FOR DATE: Look for "Période" field first, which shows a date range (e.g., "01/05/2025 - 31/05/2025"). If this exists, use the START date of the range as the invoice_date. Only if no "Période" field exists, then use the regular invoice date. The "Période" represents the service period and is more important for our filing system than the actual invoice creation date.
                 
                 Invoice text:
@@ -991,72 +957,55 @@ class PDFRenamer:
             
             best_match = None
             best_similarity = 0.0
-            address_similarities = []
             
             for restaurant in name_matches:
                 addr_similarity = self._calculate_address_similarity(
                     restaurant_address, 
                     restaurant.get('Adresse', '')
                 )
-                address_similarities.append((restaurant, addr_similarity))
                 if addr_similarity > best_similarity:
                     best_similarity = addr_similarity
                     best_match = restaurant
             
-            # Use adaptive threshold based on the range of similarities
-            similarities = [sim for _, sim in address_similarities]
-            max_sim = max(similarities)
-            min_sim = min(similarities)
-            sim_range = max_sim - min_sim
-            
-            # If there's a clear winner (good separation between best and others), use lower threshold
-            # If similarities are close, require higher confidence
-            if sim_range > 0.15:  # Good separation between candidates
-                threshold = max(0.2, max_sim - 0.15)  # Use the best minus margin, but not below 0.2
-                logger.debug(f"Good separation in address similarities, using adaptive threshold: {threshold:.2f}")
-            else:
-                threshold = 0.7  # Original high threshold when similarities are close
-                logger.debug(f"Close address similarities, using high threshold: {threshold:.2f}")
-            
-            if best_match and best_similarity > threshold:
+            if best_match and best_similarity > 0.7:  # Increased threshold for higher confidence
                 # Additional validation: check postal code if available
                 invoice_postal_code = self._extract_postal_code(restaurant_address)
                 restaurant_postal_code = best_match.get('CP', '')
                 
                 if invoice_postal_code and restaurant_postal_code:
                     if str(restaurant_postal_code) != invoice_postal_code:
-                        logger.debug(f"Postal code mismatch: invoice {invoice_postal_code} vs restaurant {restaurant_postal_code}")
+                        logger.warning(f"Address match found but postal codes don't match: invoice {invoice_postal_code} vs restaurant {restaurant_postal_code}")
                         
                         # Allow very strong address matches (>0.8) to override postal code mismatches
                         if best_similarity > 0.8:
-                            logger.info(f"⚠️  OVERRIDE: Accepting high-confidence address match despite postal code mismatch")
+                            logger.info(f"⚠️  OVERRIDE: Accepting high-confidence address match despite postal code mismatch: {best_match.get('Nom', '')} (Site {best_match.get('Site', '')}, similarity: {best_similarity:.2f})")
                             site_number = best_match.get('Site', best_match.get('Code client'))
                             matched_name = best_match.get('Nom', '')
                             if site_number:
-                                logger.info(f"Address disambiguation successful: {entreprise_name} -> {matched_name} (Site {site_number})")
+                                logger.info(f"Address disambiguation successful with postal code override: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f}, invoice CP: {invoice_postal_code}, restaurant CP: {restaurant_postal_code})")
                                 return str(site_number), matched_name
                         else:
-                            logger.debug(f"Rejecting address match due to postal code mismatch")
+                            logger.info(f"Rejecting address match due to postal code mismatch: {best_match.get('Nom', '')} (Site {best_match.get('Site', '')}, similarity: {best_similarity:.2f})")
                     else:
                         site_number = best_match.get('Site', best_match.get('Code client'))
                         matched_name = best_match.get('Nom', '')
                         if site_number:
-                            logger.info(f"Address disambiguation successful: {entreprise_name} -> {matched_name} (Site {site_number})")
+                            logger.info(f"Address disambiguation successful with postal code validation: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f}, CP: {invoice_postal_code})")
                             return str(site_number), matched_name
                 else:
                     # No postal code available for validation - proceed with address match
                     site_number = best_match.get('Site', best_match.get('Code client'))
                     matched_name = best_match.get('Nom', '')
                     if site_number:
-                        logger.info(f"Address disambiguation successful: {entreprise_name} -> {matched_name} (Site {site_number})")
+                        logger.info(f"Address disambiguation successful (no postal code validation): {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f})")
                         return str(site_number), matched_name
             elif best_match:
-                logger.debug(f"Best address match has low similarity ({best_similarity:.2f}) - threshold is {threshold:.2f}")
+                logger.info(f"Best address match has low similarity ({best_similarity:.2f}) - threshold is 0.7")
             
             # If address disambiguation failed, try global postal code matching immediately
             invoice_postal_code = self._extract_postal_code(restaurant_address)
             if invoice_postal_code:
-                logger.info(f"Trying postal code matching with {invoice_postal_code}...")
+                logger.info(f"Address disambiguation failed, trying global postal code matching with {invoice_postal_code}...")
                 postal_matches = self._find_postal_code_matches(invoice_postal_code, entreprise_name or "")
                 if postal_matches:
                     if len(postal_matches) == 1:
@@ -1065,17 +1014,18 @@ class PDFRenamer:
                         site_number = best_match.get('Site', best_match.get('Code client'))
                         matched_name = best_match.get('Nom', '')
                         if site_number:
-                            logger.info(f"Found via postal code: {entreprise_name} -> {matched_name} (Site {site_number})")
+                            logger.info(f"Found via global postal code matching: {entreprise_name} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
                             return str(site_number), matched_name
                     else:
                         # Multiple global matches - use address to pick the best one
-                        logger.debug(f"Found {len(postal_matches)} postal code matches, using address to select best...")
+                        logger.info(f"Found {len(postal_matches)} global postal code matches, using address to select best match...")
                         best_match = None
                         best_similarity = 0.0
                         
                         for match_info in postal_matches:
                             restaurant = match_info['restaurant']
-                            addr_similarity = self._calculate_address_similarity_with_site_detection(restaurant_address, restaurant.get('Adresse', ''), restaurant.get('Site', ''))
+                            addr_similarity = self._calculate_address_similarity(restaurant_address, restaurant.get('Adresse', ''))
+                            logger.info(f"  Address similarity: {addr_similarity:.2f} for {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}) at {restaurant.get('Adresse', '')}")
                             if addr_similarity > best_similarity:
                                 best_similarity = addr_similarity
                                 best_match = restaurant
@@ -1084,20 +1034,24 @@ class PDFRenamer:
                             site_number = best_match.get('Site', best_match.get('Code client'))
                             matched_name = best_match.get('Nom', '')
                             if site_number:
-                                logger.info(f"Best postal code + address match: {entreprise_name} -> {matched_name} (Site {site_number})")
+                                logger.info(f"Best global postal code + address match: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f}, CP: {invoice_postal_code})")
                                 return str(site_number), matched_name
                         else:
-                            logger.warning(f"No good address match among postal code matches")
+                            logger.warning(f"No good address match among global postal code matches (best similarity: {best_similarity:.2f})")
                 else:
-                    logger.debug(f"No restaurants found with postal code {invoice_postal_code}")
+                    logger.warning(f"No restaurants found with postal code {invoice_postal_code} in global search")
         
         # If single match or no address disambiguation possible, validate postal code before returning match
         if name_matches:
-            logger.debug(f"Validating {len(name_matches)} name matches...")
+            logger.info(f"Checking {len(name_matches)} name match candidates for postal code validation:")
+            for i, restaurant in enumerate(name_matches[:3]):  # Show first 3
+                logger.info(f"  {i+1}. {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}, CP {restaurant.get('CP', '')})")
             
             # If we have a postal code from the invoice, validate against it
             invoice_postal_code = self._extract_postal_code(restaurant_address) if restaurant_address else None
             if invoice_postal_code:
+                logger.info(f"Validating name matches against invoice postal code {invoice_postal_code}...")
+                
                 # First, try to find exact matches within the name matches
                 postal_code_name_matches = []
                 for restaurant in name_matches:
@@ -1106,47 +1060,33 @@ class PDFRenamer:
                         postal_code_name_matches.append(restaurant)
                 
                 if postal_code_name_matches:
-                    # Found matches within name matches - use hybrid approach to pick the best one
+                    # Found matches within name matches - use name similarity to pick the best one
                     if len(postal_code_name_matches) == 1:
                         best_match = postal_code_name_matches[0]
                     else:
-                        # Multiple matches - use hybrid scoring (name + address similarity) to pick the best one
-                        logger.debug(f"Found {len(postal_code_name_matches)} postal code matches, using hybrid scoring...")
+                        # Multiple matches - use name similarity to pick the best one
+                        logger.info(f"Found {len(postal_code_name_matches)} postal code matches within name matches, using name similarity...")
                         best_match = None
-                        best_score = 0.0
+                        best_similarity = 0.0
                         
                         for restaurant in postal_code_name_matches:
                             restaurant_name = restaurant.get('Nom', '').lower()
-                            name_similarity = self._calculate_name_similarity(normalized_name, restaurant_name)
-                            
-                            # Calculate address similarity if address is provided
-                            address_similarity = 0.0
-                            if restaurant_address:
-                                address_similarity = self._calculate_address_similarity(restaurant_address, restaurant.get('Adresse', ''))
-                            
-                            # Hybrid scoring: prioritize address when name similarities are close (within 0.05)
-                            # If address is available and names are similar, address becomes the tie-breaker
-                            if restaurant_address and len([r for r in postal_code_name_matches 
-                                                         if abs(self._calculate_name_similarity(normalized_name, r.get('Nom', '').lower()) - name_similarity) <= 0.05]) > 1:
-                                # Names are close, use address as primary factor with name as secondary
-                                hybrid_score = address_similarity * 0.7 + name_similarity * 0.3
-                                logger.debug(f"  Hybrid score: {hybrid_score:.2f} for {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')})")
-                            else:
-                                # Use name similarity as primary factor
-                                hybrid_score = name_similarity * 0.7 + address_similarity * 0.3
-                            
-                            if hybrid_score > best_score:
-                                best_score = hybrid_score
+                            similarity = self._calculate_name_similarity(normalized_name, restaurant_name)
+                            logger.info(f"  Name similarity: {similarity:.2f} for {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')})")
+                            if similarity > best_similarity:
+                                best_similarity = similarity
                                 best_match = restaurant
+                        
+                        logger.info(f"Best name match within postal code matches: {best_match.get('Nom', '')} (similarity: {best_similarity:.2f})")
                     
                     site_number = best_match.get('Site', best_match.get('Code client'))
                     matched_name = best_match.get('Nom', '')
                     if site_number:
-                        logger.info(f"Found validated match: {entreprise_name} -> {matched_name} (Site {site_number})")
+                        logger.info(f"Found validated match: {entreprise_name} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
                         return str(site_number), matched_name
                 else:
                     # No matches within name matches - search ALL restaurants with this postal code
-                    logger.debug(f"No postal code matches within name matches, searching all restaurants with postal code {invoice_postal_code}...")
+                    logger.info(f"No postal code matches within name matches, searching all restaurants with postal code {invoice_postal_code}...")
                     all_postal_matches = []
                     for restaurant in self.restaurants_data:
                         restaurant_postal_code = restaurant.get('CP', '')
@@ -1154,6 +1094,10 @@ class PDFRenamer:
                             all_postal_matches.append(restaurant)
                     
                     if all_postal_matches:
+                        logger.info(f"Found {len(all_postal_matches)} restaurants with postal code {invoice_postal_code}")
+                        for i, restaurant in enumerate(all_postal_matches[:5]):  # Show first 5
+                            logger.info(f"  {i+1}. {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}, CP {restaurant.get('CP', '')})")
+                        
                         # Now match by name similarity within these postal code matches
                         best_match = None
                         best_similarity = 0.0
@@ -1169,36 +1113,26 @@ class PDFRenamer:
                             site_number = best_match.get('Site', best_match.get('Code client'))
                             matched_name = best_match.get('Nom', '')
                             if site_number:
-                                logger.info(f"Found postal code + name match: {entreprise_name} -> {matched_name} (Site {site_number})")
+                                logger.info(f"Found postal code + name match: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f}, CP: {invoice_postal_code})")
                                 return str(site_number), matched_name
                         
-                        logger.warning(f"Found restaurants with postal code {invoice_postal_code} but no good name matches")
+                        logger.warning(f"Found restaurants with postal code {invoice_postal_code} but no good name matches (best similarity: {best_similarity:.2f})")
                     else:
                         logger.warning(f"No restaurants found with postal code {invoice_postal_code}")
                 
-                logger.warning(f"No validated matches found for postal code {invoice_postal_code}")
+                logger.warning(f"No validated matches found for postal code {invoice_postal_code} - cannot safely assign site number")
                 return None, None
             else:
-                # No postal code available - use best name similarity match as fallback
-                logger.warning(f"No postal code available for validation - using best name similarity match as fallback")
-                
-                # Calculate name similarity for all matches and pick the best one
-                best_match = None
-                best_similarity = 0.0
-                
-                for restaurant in name_matches:
-                    restaurant_name = restaurant.get('Nom', '').lower()
-                    similarity = self._calculate_name_similarity(normalized_name, restaurant_name)
-                    if similarity > best_similarity:
-                        best_similarity = similarity
-                        best_match = restaurant
-                
-                if best_match:
-                    site_number = best_match.get('Site', best_match.get('Code client'))
-                    matched_name = best_match.get('Nom', '')
-                    if site_number:
-                        logger.warning(f"Using best similarity fallback match: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.3f})")
-                        return str(site_number), matched_name
+                # No postal code available - use first match as fallback (risky but legacy behavior)
+                logger.warning(f"No postal code available for validation - using first name match as fallback")
+                # Sort by name length (prefer shorter, more generic names)
+                name_matches.sort(key=lambda x: len(x.get('Nom', '')))
+                first_match = name_matches[0]
+                site_number = first_match.get('Site', first_match.get('Code client'))
+                matched_name = first_match.get('Nom', '')
+                if site_number:
+                    logger.warning(f"Using unvalidated fallback match: {entreprise_name} -> {matched_name} (Site {site_number})")
+                    return str(site_number), matched_name
         
         return None, None
     
@@ -1208,10 +1142,6 @@ class PDFRenamer:
         name1_clean = re.sub(r'[^\w\s]', '', name1.lower())
         name2_clean = re.sub(r'[^\w\s]', '', name2.lower())
         
-        # First try exact/substring matching
-        if name1_clean == name2_clean or name1_clean in name2_clean or name2_clean in name1_clean:
-            return True
-        
         # For McDonald's, check if location matches
         if any(variant in name1_clean for variant in ['mcdonald', 'mac do']):
             if any(variant in name2_clean for variant in ['mcdonald', 'mac do']):
@@ -1219,56 +1149,12 @@ class PDFRenamer:
                 location1 = re.sub(r'(mcdonald[s]?|mac\s*do)', '', name1_clean).strip()
                 location2 = re.sub(r'(mcdonald[s]?|mac\s*do)', '', name2_clean).strip()
                 
-                # Skip matching if location is too generic or contains only site numbers
-                generic_patterns = [r'^site\s*\d+$', r'^site$', r'^\d+$']
-                for pattern in generic_patterns:
-                    if re.match(pattern, location1) or re.match(pattern, location2):
-                        logger.debug(f"Skipping generic location match: '{location1}' vs '{location2}'")
-                        return False
-                
-                # Require meaningful location names (at least 3 chars, not just numbers)
-                if len(location1) < 3 or len(location2) < 3:
-                    return False
-                
                 # Check if locations match or are similar
-                if location1 in location2 or location2 in location1:
-                    return True
-                    
-                # Use fuzzy matching for locations (handling typos like "chateaudon" vs "chateaudun")
-                location_similarity = fuzz.ratio(location1, location2)
-                if location_similarity >= 85:  # 85% similarity threshold for locations
-                    logger.info(f"Fuzzy matched McDonald's locations: '{location1}' vs '{location2}' (score: {location_similarity})")
-                    return True
-                    
-                # Check individual words in locations
-                location1_words = [w for w in location1.split() if len(w) > 2]
-                location2_words = [w for w in location2.split() if len(w) > 2]
-                
-                for word1 in location1_words:
-                    for word2 in location2_words:
-                        word_similarity = fuzz.ratio(word1, word2)
-                        if word_similarity >= 90:  # Higher threshold for individual words
-                            logger.debug(f"Fuzzy matched McDonald's location words: '{word1}' vs '{word2}' (score: {word_similarity})")
-                            return True
+                return location1 in location2 or location2 in location1 or \
+                       any(word in location2.split() for word in location1.split() if len(word) > 2)
         
-        # For non-McDonald's restaurants, use fuzzy matching
-        overall_similarity = fuzz.ratio(name1_clean, name2_clean)
-        if overall_similarity >= 85:  # 85% similarity threshold
-            logger.debug(f"Fuzzy matched restaurant names: '{name1_clean}' vs '{name2_clean}' (score: {overall_similarity})")
-            return True
-        
-        # Check individual words for partial matches
-        name1_words = [w for w in name1_clean.split() if len(w) > 3]
-        name2_words = [w for w in name2_clean.split() if len(w) > 3]
-        
-        for word1 in name1_words:
-            for word2 in name2_words:
-                word_similarity = fuzz.ratio(word1, word2)
-                if word_similarity >= 90:  # Higher threshold for individual words
-                    logger.debug(f"Fuzzy matched restaurant name words: '{word1}' vs '{word2}' (score: {word_similarity})")
-                    return True
-        
-        return False
+        # For non-McDonald's restaurants, check for direct name similarity
+        return name1_clean == name2_clean or name1_clean in name2_clean or name2_clean in name1_clean
     
     def _determine_collecte_suffix(self, collecte: str) -> str:
         """Return the collecte name without waste type suffixes and spaces removed."""
@@ -1543,38 +1429,18 @@ class PDFRenamer:
             
         provider_upper = provider_name.upper()
         
-        # First, try exact matching (as before)
+        # Check if any collecte name is contained in the provider name
         for collecte in self.prestataires_data.keys():
             collecte_upper = collecte.upper()
             if collecte_upper in provider_upper:
-                logger.info(f"Found base collecte '{collecte}' in provider '{provider_name}' (exact match)")
+                logger.info(f"Found base collecte '{collecte}' in provider '{provider_name}'")
                 return collecte
         
-        # If no exact match, use fuzzy matching
-        collecte_names = list(self.prestataires_data.keys())
-        
-        # Try fuzzy matching on the full provider name first
-        best_match = process.extractOne(provider_upper, [c.upper() for c in collecte_names], scorer=fuzz.partial_ratio)
-        if best_match and best_match[1] >= 85:  # 85% similarity threshold
-            matched_collecte = collecte_names[[c.upper() for c in collecte_names].index(best_match[0])]
-            logger.info(f"Found base collecte '{matched_collecte}' via fuzzy matching (full name, score: {best_match[1]})")
-            return matched_collecte
-        
-        # Try fuzzy matching on individual words in the provider name
-        provider_words = provider_upper.split()
-        for word in provider_words:
-            if len(word) >= 4:  # Only consider words with 4+ characters
-                best_word_match = process.extractOne(word, [c.upper() for c in collecte_names], scorer=fuzz.ratio)
-                if best_word_match and best_word_match[1] >= 90:  # Higher threshold for individual words
-                    matched_collecte = collecte_names[[c.upper() for c in collecte_names].index(best_word_match[0])]
-                    logger.info(f"Found base collecte '{matched_collecte}' via fuzzy word matching (word: '{word}', score: {best_word_match[1]})")
-                    return matched_collecte
-        
-        # Fallback to manual mappings for common variations and OCR errors
+        # If no direct match, try partial matching for common variations
         common_mappings = {
             'SUEZ': ['SUEZ'],
             'VEOLIA': ['VEOLIA'],
-            'REFOOD': ['REFOOD', 'REFOUD', 'REF0OD', 'REFO0D'],  # Handle OCR errors (0 vs O)
+            'REFOOD': ['REFOOD'],
             'PAPREC': ['PAPREC'],
             'ELISE': ['ELISE'],
             'DERICHEBOURG': ['DERICHEBOURG'],
@@ -1587,10 +1453,10 @@ class PDFRenamer:
         for base_name, variations in common_mappings.items():
             for variation in variations:
                 if variation in provider_upper:
-                    logger.info(f"Found base collecte '{base_name}' via manual mapping from provider '{provider_name}'")
+                    logger.info(f"Found base collecte '{base_name}' via mapping from provider '{provider_name}'")
                     return base_name
         
-        logger.warning(f"Could not find base collecte name for provider '{provider_name}' even with fuzzy matching")
+        logger.warning(f"Could not find base collecte name for provider '{provider_name}'")
         return None
 
 
