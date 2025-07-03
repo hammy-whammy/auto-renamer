@@ -1481,9 +1481,21 @@ class PDFRenamer:
             extracted_data['error'] = f"Invoice provider is {provider_name} but no site_number was found in the analysis"
             return None, extracted_data
 
-        # Sanitize site number to remove any non-digit characters
+        # Sanitize site number to remove non-digits and leading zeros
         if isinstance(site_number, str):
-            site_number = re.sub(r'\D', '', site_number)
+            # Remove all non-digit characters
+            site_number_digits = re.sub(r'\D', '', site_number)
+            if site_number_digits:
+                # Convert to int and back to string to remove leading zeros
+                site_number = str(int(site_number_digits))
+            else:
+                site_number = "" # Set to empty if no digits found
+        elif isinstance(site_number, int):
+            site_number = str(site_number)
+
+        if not site_number:
+            extracted_data['error'] = f"Site number is empty after sanitization for provider {provider_name}"
+            return None, extracted_data
 
         invoice_date = analysis.get('invoice_date')
         invoice_number = analysis.get('invoice_number')
