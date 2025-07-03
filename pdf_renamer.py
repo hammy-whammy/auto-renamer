@@ -745,6 +745,7 @@ class PDFRenamer:
           3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
           4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
         - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
+        - CRITICAL: "SOCIETE RUBO" is NEVER the invoice_provider. If you see "SOCIETE RUBO", you MUST find another company name in the document to use as the invoice_provider. The actual provider will be another company mentioned in the invoice (e.g., a logo, another address).
         - The invoice provider is usually the company issuing the invoice
         - Be very careful with the invoice number - it's usually prominently displayed
         - CRITICAL: Look for company logos in the image! Sometimes the invoice provider will not be listed explicitly via text, in this case you MUST use the logos to identify the provider (e.g., SUEZ logo, VEOLIA logo, PAPREC logo) and use that as the invoice_provider
@@ -786,6 +787,7 @@ class PDFRenamer:
                   3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
                   4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
                 - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
+                - CRITICAL: "SOCIETE RUBO" is NEVER the invoice_provider. If you see "SOCIETE RUBO", you MUST find another company name in the document to use as the invoice_provider. The actual provider will be another company mentioned in the invoice.
                 - The invoice provider is usually the company issuing the invoice
                 - Be very careful with the invoice number - it's usually prominently displayed
                 - CRITICAL FOR DATE: Look for "Période" field first, which shows a date range (e.g., "01/05/2025 - 31/05/2025"). If this exists, use the START date of the range as the invoice_date. Only if no "Période" field exists, then use the regular invoice date. The "Période" represents the service period and is more important for our filing system than the actual invoice creation date.
