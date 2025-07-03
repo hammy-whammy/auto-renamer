@@ -755,12 +755,8 @@ class PDFRenamer:
         - For "REFOOD" invoices, the site number is found after the text "N° commande - vos références :". It might be preceded by a hyphen (e.g., "-1419"). You must extract only the number itself (e.g., "1419"). For example, from "N° commande - vos références : -353", extract 353.
         - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
         - Extract the restaurant address if visible - this helps identify the specific location
-        - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
-          1. Look for a SECONDARY address elsewhere in the invoice that represents the actual restaurant location
-          2. Use that secondary address as the restaurant_address
-          3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
-          4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
-        - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
+        - CRITICAL: The address "34 BOULEVARD DES ITALIENS" belongs to "SOCIETE RUBO", which is our own company, NOT the restaurant. You MUST NOT extract this address as the `restaurant_address`. If this is the only address you can find, you MUST return `null` for the `restaurant_address` field.
+        - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document. If no other address is found, return `null`.
         - CRITICAL: "SOCIETE RUBO" is NEVER the invoice_provider. If you see "SOCIETE RUBO", you MUST find another company name in the document to use as the invoice_provider. The actual provider will be another company mentioned in the invoice (e.g., a logo, another address).
         - The invoice provider is usually the company issuing the invoice
         - Be very careful with the invoice number - it's usually prominently displayed
@@ -800,12 +796,8 @@ class PDFRenamer:
                 - For "REFOOD" invoices, the site number is found after the text "N° commande - vos références :". It might be preceded by a hyphen (e.g., "-1419"). You must extract only the number itself (e.g., "1419"). For example, from "N° commande - vos références : -353", extract 353.
                 - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
                 - Extract the restaurant address if visible - this helps identify the specific location
-                - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
-                  1. Look for a SECONDARY address elsewhere in the invoice that represents the actual restaurant location
-                  2. Use that secondary address as the restaurant_address
-                  3. For the entreprise field, try to derive a restaurant name from that secondary address or from other context in the document (e.g., if you see "116 Boulevard Diderot", this might be "McDonald's Diderot" or similar)
-                  4. If no clear restaurant name can be derived, set entreprise to null and rely on the secondary address for matching
-                - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document
+                - CRITICAL: The address "34 BOULEVARD DES ITALIENS" belongs to "SOCIETE RUBO", which is our own company, NOT the restaurant. You MUST NOT extract this address as the `restaurant_address`. If this is the only address you can find, you MUST return `null` for the `restaurant_address` field.
+                - When "SOCIETE RUBO" is present, ignore the "34 BOULEVARD DES ITALIENS" address completely and find the restaurant's actual address listed elsewhere in the document. If no other address is found, return `null`.
                 - CRITICAL: "SOCIETE RUBO" is NEVER the invoice_provider. If you see "SOCIETE RUBO", you MUST find another company name in the document to use as the invoice_provider. The actual provider will be another company mentioned in the invoice.
                 - The invoice provider is usually the company issuing the invoice
                 - Be very careful with the invoice number - it's usually prominently displayed
@@ -1315,6 +1307,13 @@ class PDFRenamer:
             }
             return None, error_details
         
+        # Post-process to filter out the known incorrect RUBO address
+        # This is a safeguard against the AI model incorrectly extracting our company's address.
+        raw_address = analysis.get('restaurant_address')
+        if isinstance(raw_address, str) and "34" in raw_address and "boulevard des italiens" in raw_address.lower():
+            logger.warning(f"AI returned the RUBO address '{raw_address}'. Ignoring it as per rules.")
+            analysis['restaurant_address'] = None
+
         # Extract required information
         entreprise = analysis.get('entreprise', '')
         invoice_provider = analysis.get('invoice_provider', '')
