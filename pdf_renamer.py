@@ -20,6 +20,7 @@ import argparse
 from dotenv import load_dotenv
 import pandas as pd
 from difflib import SequenceMatcher
+import unicodedata
 
 # Load environment variables
 load_dotenv()
@@ -470,6 +471,18 @@ class PDFRenamer:
         # Create lookup dictionaries for faster matching
         self.restaurant_lookup = self._create_restaurant_lookup()
         
+    def _normalize_text(self, text: str) -> str:
+        """Normalize text by lowercasing, removing accents, and stripping extra whitespace."""
+        if not text:
+            return ""
+        
+        # NFD form separates characters from their accents
+        # Then we remove combining marks (the accents)
+        text = ''.join(c for c in unicodedata.normalize('NFD', text) 
+                       if unicodedata.category(c) != 'Mn')
+        
+        return text.lower().strip()
+
     def _load_restaurants_data(self) -> List[Dict]:
         """Load restaurant data from Excel file only."""
         restaurants = []
@@ -906,12 +919,30 @@ class PDFRenamer:
         """
         normalized_name = entreprise_name.lower().strip() if entreprise_name else ""
         
-        # First try: Name-based matching (from Excel data) - skip if no name provided
+        # First try: Name-based matching, now enhanced to check address
         name_matches = []
         if normalized_name:
+            # Extract keywords from AI-provided name (e.g., "traversiere" from "mcdonald's traversiere")
+            normalized_keywords_str = self._normalize_text(re.sub(r'(mcdonald[s]?|mac\s*do)', '', normalized_name).strip())
+            name_keywords = set(normalized_keywords_str.split())
+
             for restaurant in self.restaurants_data:
                 restaurant_name = restaurant.get('Nom', '').lower()
-                if self._is_similar_restaurant_name(normalized_name, restaurant_name):
+                db_address = restaurant.get('Adresse', '').lower()
+
+                # Condition 1: Check for similarity in name
+                is_similar_name = self._is_similar_restaurant_name(normalized_name, restaurant_name)
+
+                # Condition 2: Check if keywords from AI name are in the DB address (accent-insensitive)
+                normalized_db_address = self._normalize_text(db_address)
+                address_contains_keyword = False
+                if name_keywords:
+                    for keyword in name_keywords:
+                        if len(keyword) > 3 and keyword in normalized_db_address:
+                            address_contains_keyword = True
+                            break
+                
+                if is_similar_name or address_contains_keyword:
                     name_matches.append(restaurant)
         
         # If no name provided or no Excel matches found, try address-based matching if address provided
@@ -1025,27 +1056,47 @@ class PDFRenamer:
                             logger.info(f"Found via global postal code matching: {entreprise_name} -> {matched_name} (Site {site_number}, CP: {invoice_postal_code})")
                             return str(site_number), matched_name
                     else:
-                        # Multiple global matches - use address to pick the best one
-                        logger.info(f"Found {len(postal_matches)} global postal code matches, using address to select best match...")
+                        # Multiple global matches - use a combined score of name and address to pick the best one
+                        logger.info(f"Found {len(postal_matches)} global postal code matches, using combined name and address score to select best match...")
                         best_match = None
-                        best_similarity = 0.0
+                        best_combined_score = 0.0
                         
                         for match_info in postal_matches:
                             restaurant = match_info['restaurant']
+                            restaurant_name = restaurant.get('Nom', '')
+                            
                             addr_similarity = self._calculate_address_similarity(restaurant_address, restaurant.get('Adresse', ''))
-                            logger.info(f"  Address similarity: {addr_similarity:.2f} for {restaurant.get('Nom', '')} (Site {restaurant.get('Site', '')}) at {restaurant.get('Adresse', '')}")
-                            if addr_similarity > best_similarity:
-                                best_similarity = addr_similarity
+                            name_similarity = self._calculate_name_similarity(entreprise_name or "", restaurant_name)
+
+                            # Give preference to shorter, more exact matches ("less is more")
+                            # Penalize if the DB name is much longer than the invoice name but contains it
+                            if len(restaurant_name) > len(entreprise_name or "") and (entreprise_name or "").lower() in restaurant_name.lower():
+                                name_similarity *= 0.9
+
+                            # Boost exact matches significantly
+                            if restaurant_name.lower() == (entreprise_name or "").lower():
+                                name_similarity = 1.5
+                            
+                            # Weights for combining scores
+                            name_weight = 0.7
+                            addr_weight = 0.3
+                            combined_score = (name_similarity * name_weight) + (addr_similarity * addr_weight)
+
+                            logger.info(f"  - Candidate: {restaurant_name} (Site {restaurant.get('Site', '')})")
+                            logger.info(f"    Scores -> Name Sim: {name_similarity:.2f}, Addr Sim: {addr_similarity:.2f}, Combined: {combined_score:.2f}")
+
+                            if combined_score > best_combined_score:
+                                best_combined_score = combined_score
                                 best_match = restaurant
                         
-                        if best_match and best_similarity >= 0.4:  # Lower threshold for postal code matches
+                        if best_match and best_combined_score >= 0.5:  # Use a threshold for the combined score
                             site_number = best_match.get('Site', best_match.get('Code client'))
                             matched_name = best_match.get('Nom', '')
                             if site_number:
-                                logger.info(f"Best global postal code + address match: {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f}, CP: {invoice_postal_code})")
+                                logger.info(f"Best global postal code + combined score match: {entreprise_name} -> {matched_name} (Site {site_number}, score: {best_combined_score:.2f}, CP: {invoice_postal_code})")
                                 return str(site_number), matched_name
                         else:
-                            logger.warning(f"No good address match among global postal code matches (best similarity: {best_similarity:.2f})")
+                            logger.warning(f"No good combined score match among global postal code matches (best score: {best_combined_score:.2f})")
                 else:
                     logger.warning(f"No restaurants found with postal code {invoice_postal_code} in global search")
         
@@ -1169,10 +1220,17 @@ class PDFRenamer:
         return collecte.upper().replace(' ', '')
     
     def _sanitize_invoice_number(self, invoice_number: str) -> str:
-        """Sanitize invoice number by removing spaces, dashes, and slashes."""
+        """Sanitize invoice number by removing accents and all non-alphanumeric characters."""
         if not invoice_number:
             return invoice_number
-        return invoice_number.replace(' ', '').replace('-', '').replace('/', '').replace('\\', '')
+        
+        # Normalize to remove accents, preserving case
+        deaccented = ''.join(c for c in unicodedata.normalize('NFKD', invoice_number) if not unicodedata.combining(c))
+        
+        # Remove all non-alphanumeric characters
+        sanitized = re.sub(r'[^a-zA-Z0-9]', '', deaccented)
+        
+        return sanitized.replace('\\', '')
     
     def _format_date(self, date_str: str) -> str:
         """Format date from DD/MM/YYYY to MMYYYY."""
