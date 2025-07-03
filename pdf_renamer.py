@@ -246,10 +246,10 @@ class ProcessingLogger:
 class PersistentRateLimiter:
     """
     Persistent rate limiter that stores usage data across program runs.
-    Respects Google Gemini API free tier limits with local file persistence.
+    Respects Google Gemini API limits with local file persistence.
     """
     
-    def __init__(self, max_per_minute: int = 15, max_per_day: int = 1500, storage_file: str = ".api_usage.json"):
+    def __init__(self, max_per_minute: int = 1000, max_per_day: int = 10000, storage_file: str = ".api_usage.json"):
         self.max_per_minute = max_per_minute
         self.max_per_day = max_per_day
         self.storage_file = Path(storage_file)
@@ -446,15 +446,15 @@ class PDFRenamer:
             raise ValueError("Please set your Gemini API key in the .env file or pass it as a parameter")
         
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
+        self.model = genai.GenerativeModel('gemini-2.5-flash')
         self.csv_dir = Path(csv_dir)
         
         # Initialize enhanced logging
         self.processing_logger = ProcessingLogger(enable_file_logging=enable_detailed_logging)
         
         # Initialize persistent rate limiter
-        max_per_minute = int(os.getenv('MAX_REQUESTS_PER_MINUTE', 15))
-        max_per_day = int(os.getenv('MAX_REQUESTS_PER_DAY', 1500))
+        max_per_minute = int(os.getenv('MAX_REQUESTS_PER_MINUTE', 1000))
+        max_per_day = int(os.getenv('MAX_REQUESTS_PER_DAY', 10000))
         self.rate_limiter = PersistentRateLimiter(max_per_minute, max_per_day)
         
         logger.info(f"Rate limiter initialized: {max_per_minute}/minute, {max_per_day}/day")
