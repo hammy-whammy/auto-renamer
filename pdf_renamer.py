@@ -467,6 +467,14 @@ class PDFRenamer:
         self.restaurants_data = self._load_restaurants_data()
         self.prestataires_data = self._load_prestataires_data()
         self.valid_collectors = self._load_valid_collectors()
+
+        # Define provider aliases to map subsidiaries to their parent company
+        self.provider_aliases = {
+            'COVED': 'PAPREC'
+            # Add other aliases here in the future, e.g., 'SUBSIDIARY': 'PARENT'
+        }
+        if self.provider_aliases:
+            logger.info(f"Loaded {len(self.provider_aliases)} provider aliases: {self.provider_aliases}")
         
         # Create lookup dictionaries for faster matching
         self.restaurant_lookup = self._create_restaurant_lookup()
@@ -1497,6 +1505,13 @@ class PDFRenamer:
             return None
             
         provider_upper = provider_name.upper()
+        
+        # 1. Check for an exact match in the alias dictionary first
+        for alias, parent in self.provider_aliases.items():
+            if alias.upper() in provider_upper:
+                logger.info(f"Found provider '{alias}' and mapped to parent '{parent}' via alias dictionary.")
+                return parent
+
         # Split by common delimiters like space, hyphen, or period.
         provider_words = set(re.split(r'[\s.-]', provider_upper))
 
