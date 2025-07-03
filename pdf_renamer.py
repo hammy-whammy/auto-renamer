@@ -739,7 +739,7 @@ class PDFRenamer:
         
         Important notes:
         - For "ABCDE" invoices, the site number is in a format like "Mcdonald's n°620". Extract 620.
-        - For "REFOOD" invoices, the site number is in a format like "N° commande - vos références : -353". Extract 353. DO NOT extract the hyphen before the site number in this case. we do not want -353, just 353.
+        - For "REFOOD" invoices, the site number is found after the text "N° commande - vos références :". It might be preceded by a hyphen (e.g., "-1419"). You must extract only the number itself (e.g., "1419"). For example, from "N° commande - vos références : -353", extract 353.
         - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
         - Extract the restaurant address if visible - this helps identify the specific location
         - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
@@ -784,7 +784,7 @@ class PDFRenamer:
                 
                 Important notes:
                 - For "ABCDE" invoices, the site number is in a format like "Mcdonald's n°620". Extract 620.
-                - For "REFOOD" invoices, the site number is in a format like "N° commande - vos références : -353". Extract 353. DO NOT extract the hyphen before the site number in this case. we do not want -353, just 353.
+                - For "REFOOD" invoices, the site number is found after the text "N° commande - vos références :". It might be preceded by a hyphen (e.g., "-1419"). You must extract only the number itself (e.g., "1419"). For example, from "N° commande - vos références : -353", extract 353.
                 - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
                 - Extract the restaurant address if visible - this helps identify the specific location
                 - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
