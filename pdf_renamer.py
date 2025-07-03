@@ -1493,39 +1493,51 @@ class PDFRenamer:
         self.rate_limiter.reset_today_count()
     
     def _find_base_collecte_name(self, provider_name):
-        """Find the base collecte name from a full provider name using fuzzy matching."""
+        """Find the base collecte name from a full provider name using a multi-step matching process."""
         if not provider_name:
             return None
             
         provider_upper = provider_name.upper()
-        
-        # Check if any collecte name is contained in the provider name
-        for collecte in self.prestataires_data.keys():
+        # Split by common delimiters like space, hyphen, or period.
+        provider_words = set(re.split(r'[\s.-]', provider_upper))
+
+        # 1. Word-based match (e.g., "SUEZ" in "SUEZ EAU FRANCE")
+        # More robust than substring; we sort by word count to prioritize more specific matches.
+        sorted_collectors_by_word_count = sorted(self.prestataires_data.keys(), key=lambda x: len(x.split()), reverse=True)
+        for collecte in sorted_collectors_by_word_count:
+            collecte_upper = collecte.upper()
+            collecte_words = set(collecte_upper.split())
+            if collecte_words.issubset(provider_words):
+                logger.info(f"Found base collecte '{collecte}' via word match in provider '{provider_name}'")
+                return collecte
+
+        # 2. Substring match as a fallback (e.g., "PAPREC" in "PAPREC IDF")
+        # Sort collectors by length (longest first) to avoid partial matches like "PAP" instead of "PAPREC".
+        sorted_collectors_by_len = sorted(self.prestataires_data.keys(), key=len, reverse=True)
+        for collecte in sorted_collectors_by_len:
             collecte_upper = collecte.upper()
             if collecte_upper in provider_upper:
-                logger.info(f"Found base collecte '{collecte}' in provider '{provider_name}'")
+                logger.info(f"Found base collecte '{collecte}' via substring match in provider '{provider_name}'")
                 return collecte
         
-        # If no direct match, try partial matching for common variations
-        common_mappings = {
-            'SUEZ': ['SUEZ'],
-            'VEOLIA': ['VEOLIA'],
-            'REFOOD': ['REFOOD'],
-            'PAPREC': ['PAPREC'],
-            'ELISE': ['ELISE'],
-            'DERICHEBOURG': ['DERICHEBOURG'],
-            'ORTEC': ['ORTEC'],
-            'ATESIS': ['ATESIS'],
-            'BRANGEON': ['BRANGEON'],
-            'COLLECTEA': ['COLLECTEA'],
-        }
-        
-        for base_name, variations in common_mappings.items():
-            for variation in variations:
-                if variation in provider_upper:
-                    logger.info(f"Found base collecte '{base_name}' via mapping from provider '{provider_name}'")
-                    return base_name
-        
+        # 3. Fuzzy matching for spelling variations (e.g., ALCHIMISTES vs ALCHEMISTES)
+        best_match = None
+        best_ratio = 0.0
+        # Compare each known collector against each word from the invoice's provider name
+        for collecte in self.prestataires_data.keys():
+            collecte_upper = collecte.upper()
+            for provider_word in provider_words:
+                ratio = SequenceMatcher(None, collecte_upper, provider_word).ratio()
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = collecte
+
+        # Use a threshold to avoid false positives from fuzzy matching
+        FUZZY_MATCH_THRESHOLD = 0.8
+        if best_ratio >= FUZZY_MATCH_THRESHOLD:
+            logger.info(f"Found base collecte '{best_match}' via fuzzy match in provider '{provider_name}' (ratio: {best_ratio:.2f})")
+            return best_match
+    
         logger.warning(f"Could not find base collecte name for provider '{provider_name}'")
         return None
 
