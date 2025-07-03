@@ -743,7 +743,7 @@ class PDFRenamer:
         prompt = """
         Analyze this French invoice PDF and extract the following information in JSON format:
         
-        1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
+        1. entreprise: The company name. Be very specific and extract the full name. For example, if the name is "McDonald's Chalon Sur Saone Bowling", extract the entire name, not just "McDonald's Chalon". Look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.
         2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
         3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
         4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
@@ -788,7 +788,7 @@ class PDFRenamer:
                 text_prompt = f"""
                 Analyze this French invoice text and extract the following information in JSON format:
                 
-                1. entreprise: The company name (look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.)
+                1. entreprise: The company name. Be very specific and extract the full name. For example, if the name is "McDonald's Chalon Sur Saone Bowling", extract the entire name, not just "McDonald's Chalon". Look for variations of McDonald's like "MAC DO", "McDONALD'S", etc.
                 2. restaurant_address: The restaurant address if mentioned (street address, city, postal code)
                 3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
                 4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
