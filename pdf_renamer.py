@@ -735,9 +735,11 @@ class PDFRenamer:
         3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
         4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
         5. invoice_number: The invoice number (usually alphanumeric)
-        6. site_number: The site number (e.g., 620). ONLY extract this if the invoice_provider is "ABCDE". For all other providers, this should be null. This typically looks like a line item subtitle such as "Eman SAS Mcdonald's n°620 - collecte du mois de Mai 2025", here the site number is 620.
+        6. site_number: The site number (e.g., 620). ONLY extract this if the invoice_provider is "ABCDE" or "REFOOD". For all other providers, this should be null.
         
         Important notes:
+        - For "ABCDE" invoices, the site number is in a format like "Mcdonald's n°620". Extract 620.
+        - For "REFOOD" invoices, the site number is in a format like "N° commande - vos références : -353". Extract 353. DO NOT extract the hyphen before the site number in this case. we do not want -353, just 353.
         - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
         - Extract the restaurant address if visible - this helps identify the specific location
         - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
@@ -778,9 +780,11 @@ class PDFRenamer:
                 3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
                 4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
                 5. invoice_number: The invoice number (usually alphanumeric)
-                6. site_number: The site number (e.g., 620). ONLY extract this if the invoice_provider is "ABCDE". For all other providers, this should be null. This typically looks like a line item subtitle such as "Eman SAS Mcdonald's n°620 - collecte du mois de Mai 2025", here the site number is 620.
+                6. site_number: The site number (e.g., 620). ONLY extract this if the invoice_provider is "ABCDE" or "REFOOD". For all other providers, this should be null.
                 
                 Important notes:
+                - For "ABCDE" invoices, the site number is in a format like "Mcdonald's n°620". Extract 620.
+                - For "REFOOD" invoices, the site number is in a format like "N° commande - vos références : -353". Extract 353. DO NOT extract the hyphen before the site number in this case. we do not want -353, just 353.
                 - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
                 - Extract the restaurant address if visible - this helps identify the specific location
                 - CRITICAL: If you see "SOCIETE RUBO" as the company name with address "34 BOULEVARD DES ITALIENS", this is NOT the restaurant address but our company's address. In such cases:
@@ -1270,9 +1274,9 @@ class PDFRenamer:
             'raw_analysis': analysis
         }
 
-        # Handle ABCDE special case
-        if invoice_provider and invoice_provider.upper() == 'ABCDE':
-            return self._handle_abcde_invoice(analysis, extracted_data)
+        # Handle ABCDE and REFOOD special cases
+        if invoice_provider and invoice_provider.upper() in ['ABCDE', 'REFOOD']:
+            return self._handle_invoice_with_site_number(analysis, extracted_data, invoice_provider.upper())
         
         # Validate required fields
         missing_fields = []
@@ -1467,40 +1471,45 @@ class PDFRenamer:
         logger.warning(f"Could not find base collecte name for provider '{provider_name}'")
         return None
 
-    def _handle_abcde_invoice(self, analysis: Dict, extracted_data: Dict) -> Tuple[Optional[str], Dict]:
-        """Handle the specific case for ABCDE invoices where site number is directly available."""
-        logger.info("Handling special case for ABCDE invoice")
-        
+    def _handle_invoice_with_site_number(self, analysis: Dict, extracted_data: Dict, provider_name: str) -> Tuple[Optional[str], Dict]:
+        """Handle specific cases for invoices where site number is directly available."""
+        logger.info(f"Handling special case for {provider_name} invoice")
+
         site_number = analysis.get('site_number')
+
+        if not site_number:
+            extracted_data['error'] = f"Invoice provider is {provider_name} but no site_number was found in the analysis"
+            return None, extracted_data
+
+        # Sanitize site number to remove any non-digit characters
+        if isinstance(site_number, str):
+            site_number = re.sub(r'\D', '', site_number)
+
         invoice_date = analysis.get('invoice_date')
         invoice_number = analysis.get('invoice_number')
-        
-        if not site_number:
-            extracted_data['error'] = "Invoice provider is ABCDE but no site_number was found in the analysis"
-            return None, extracted_data
-            
+
         # Basic validation for other required fields
         if not invoice_date or not invoice_number:
             missing_fields = []
             if not invoice_date: missing_fields.append('invoice_date')
             if not invoice_number: missing_fields.append('invoice_number')
-            extracted_data['error'] = f"Missing required fields for ABCDE invoice: {', '.join(missing_fields)}"
+            extracted_data['error'] = f"Missing required fields for {provider_name} invoice: {', '.join(missing_fields)}"
             return None, extracted_data
 
-        collecte_suffix = "ABCDE"
+        collecte_suffix = provider_name
         formatted_date = self._format_date(invoice_date)
-        
+
         # Update extracted_data for logging
         extracted_data['site_number'] = site_number
         extracted_data['collecte'] = collecte_suffix
         extracted_data['formatted_date'] = formatted_date
-        
+
         # Generate filename
         new_filename = f"{site_number}-{collecte_suffix}-{formatted_date}-{self._sanitize_invoice_number(invoice_number)}.pdf"
         extracted_data['generated_filename'] = new_filename
-        
-        logger.info(f"Successfully generated filename for ABCDE invoice: {new_filename}")
-        
+
+        logger.info(f"Successfully generated filename for {provider_name} invoice: {new_filename}")
+
         return new_filename, extracted_data
 
 
