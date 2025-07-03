@@ -470,7 +470,9 @@ class PDFRenamer:
 
         # Define provider aliases to map subsidiaries to their parent company
         self.provider_aliases = {
-            'COVED': 'PAPREC'
+            'COVED': 'PAPREC',
+            'IDDEE 13 SAS': 'ELISE',
+            'ELISE MEDITERRANEE': 'ELISE'
             # Add other aliases here in the future, e.g., 'SUBSIDIARY': 'PARENT'
         }
         if self.provider_aliases:
@@ -756,11 +758,12 @@ class PDFRenamer:
         3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
         4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
         5. invoice_number: The invoice number (usually alphanumeric)
-        6. site_number: The site number (e.g., 620). ONLY extract this if the invoice_provider is "ABCDE" or "REFOOD". For all other providers, this should be null.
+        6. site_number: The site number (e.g., 620). ONLY extract this if the invoice_provider is "ABCDE", "REFOOD", or "VEOLIA". For all other providers, this should be null.
         
         Important notes:
         - For "ABCDE" invoices, the site number is in a format like "Mcdonald's n°620". Extract 620.
         - For "REFOOD" invoices, the site number is found after the text "N° commande - vos références :". It might be preceded by a hyphen (e.g., "-1419"). You must extract only the number itself (e.g., "1419"). For example, from "N° commande - vos références : -353", extract 353.
+        - For "VEOLIA" invoices, the site number is in a format like "MC DONALD'S - CODE RESTAURANT 865". Extract 865.
         - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
         - Extract the restaurant address if visible - this helps identify the specific location
         - CRITICAL: The address "34 BOULEVARD DES ITALIENS" belongs to "SOCIETE RUBO", which is our own company, NOT the restaurant. You MUST NOT extract this address as the `restaurant_address`. If this is the only address you can find, you MUST return `null` for the `restaurant_address` field.
@@ -797,11 +800,12 @@ class PDFRenamer:
                 3. invoice_provider: The invoice provider/collector company (like SUEZ, VEOLIA, PAPREC, etc.)
                 4. invoice_date: The relevant date for filename in DD/MM/YYYY format (see critical note below)
                 5. invoice_number: The invoice number (usually alphanumeric)
-                6. site_number: The site number (e.g., 620). ONLY extract this if the invoice_provider is "ABCDE" or "REFOOD". For all other providers, this should be null.
+                6. site_number: The site number (e.g., 620). ONLY extract this if the invoice_provider is "ABCDE", "REFOOD", or "VEOLIA". For all other providers, this should be null.
                 
                 Important notes:
                 - For "ABCDE" invoices, the site number is in a format like "Mcdonald's n°620". Extract 620.
                 - For "REFOOD" invoices, the site number is found after the text "N° commande - vos références :". It might be preceded by a hyphen (e.g., "-1419"). You must extract only the number itself (e.g., "1419"). For example, from "N° commande - vos références : -353", extract 353.
+                - For "VEOLIA" invoices, the site number is in a format like "MC DONALD'S - CODE RESTAURANT 865". Extract 865.
                 - For McDonald's variations, normalize to include the location (e.g., "MAC DO CHALON" should be "McDonald's Chalon")
                 - Extract the restaurant address if visible - this helps identify the specific location
                 - CRITICAL: The address "34 BOULEVARD DES ITALIENS" belongs to "SOCIETE RUBO", which is our own company, NOT the restaurant. You MUST NOT extract this address as the `restaurant_address`. If this is the only address you can find, you MUST return `null` for the `restaurant_address` field.
@@ -1339,8 +1343,8 @@ class PDFRenamer:
             'raw_analysis': analysis
         }
 
-        # Handle ABCDE and REFOOD special cases
-        if invoice_provider and invoice_provider.upper() in ['ABCDE', 'REFOOD']:
+        # Handle ABCDE, REFOOD, and VEOLIA special cases
+        if invoice_provider and invoice_provider.upper() in ['ABCDE', 'REFOOD', 'VEOLIA']:
             return self._handle_invoice_with_site_number(analysis, extracted_data, invoice_provider.upper())
         
         # Validate required fields
