@@ -1010,7 +1010,7 @@ class PDFRenamer:
                     best_similarity = addr_similarity
                     best_match = restaurant
             
-            if best_match and best_similarity > 0.7:  # Increased threshold for higher confidence
+            if best_match and best_similarity > 0.6:  # Lowered threshold for higher confidence
                 # Additional validation: check postal code if available
                 invoice_postal_code = self._extract_postal_code(restaurant_address)
                 restaurant_postal_code = best_match.get('CP', '')
@@ -1043,7 +1043,7 @@ class PDFRenamer:
                         logger.info(f"Address disambiguation successful (no postal code validation): {entreprise_name} -> {matched_name} (Site {site_number}, similarity: {best_similarity:.2f})")
                         return str(site_number), matched_name
             elif best_match:
-                logger.info(f"Best address match has low similarity ({best_similarity:.2f}) - threshold is 0.7")
+                logger.info(f"Best address match has low similarity ({best_similarity:.2f}) - threshold is 0.6")
             
             # If address disambiguation failed, try global postal code matching immediately
             invoice_postal_code = self._extract_postal_code(restaurant_address)
