@@ -452,12 +452,12 @@ class PDFRenamer:
         # Initialize enhanced logging
         self.processing_logger = ProcessingLogger(enable_file_logging=enable_detailed_logging)
         
-        # Initialize persistent rate limiter
-        max_per_minute = int(os.getenv('MAX_REQUESTS_PER_MINUTE', 1000))
-        max_per_day = int(os.getenv('MAX_REQUESTS_PER_DAY', 10000))
+        # Initialize persistent rate limiter for Gemini 2.5 Flash
+        max_per_minute = 1000
+        max_per_day = 10000
         self.rate_limiter = PersistentRateLimiter(max_per_minute, max_per_day)
         
-        logger.info(f"Rate limiter initialized: {max_per_minute}/minute, {max_per_day}/day")
+        logger.info(f"Rate limiter initialized: {max_per_minute}/minute, {max_per_day}/day (Gemini 2.5 Flash tier)")
         
         # Show current usage on startup
         status = self.rate_limiter.get_status()
